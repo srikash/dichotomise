@@ -42,6 +42,13 @@ def _infer_label_mode(sanitise_mode: str | None, subject_id: str | None, new_id:
 )
 @click.option("--sanitise", is_flag=True, help="Replace patient identity before final archiving.")
 @click.option(
+    "--random-name",
+    is_flag=True,
+    help="Shortcut for --sanitise --sanitise-level minimal: replace the patient name with a "
+    "random, readable placeholder (e.g. Abrahall^Gracious) rather than the plain subject "
+    "label. Implies --sanitise.",
+)
+@click.option(
     "--sanitise-mode",
     type=click.Choice(["default", "numerical", "custom"]),
     default=None,
@@ -50,10 +57,9 @@ def _infer_label_mode(sanitise_mode: str | None, subject_id: str | None, new_id:
 )
 @click.option(
     "--sanitise-level",
-    default="standard",
-    show_default=True,
-    help="How much is removed: standard keeps scan descriptions (preferred), full also "
-    "removes them; custom is a template for your own. See docs/sanitise-policies.md.",
+    default=None,
+    help="How much is removed: standard (default) keeps scan descriptions (preferred), full "
+    "also removes them; custom is a template for your own. See docs/sanitise-policies.md.",
 )
 @click.option("--subject-id", default=None, help="Numerical subject ID for numerical labels.")
 @click.option("--new-id", default=None, help="Exact replacement ID for custom labels.")
@@ -64,16 +70,24 @@ def cli(
     source_dir: Path,
     out_dir: Path,
     sanitise: bool,
+    random_name: bool,
     sanitise_mode: str | None,
-    sanitise_level: str,
+    sanitise_level: str | None,
     subject_id: str | None,
     new_id: str | None,
     keep_working_files: bool,
 ) -> None:
     """Run the standard, end-to-end dichotomise pipeline."""
+    if random_name and sanitise_level not in (None, "minimal"):
+        raise click.UsageError(
+            "--random-name implies --sanitise-level minimal; do not combine it with a "
+            "different --sanitise-level."
+        )
+    sanitise = sanitise or random_name
     if not sanitise and any((sanitise_mode, subject_id, new_id)):
         raise click.UsageError("Replacement-label options require --sanitise.")
 
+    effective_sanitise_level = sanitise_level or ("minimal" if random_name else "standard")
     label_mode = _infer_label_mode(sanitise_mode, subject_id, new_id)
 
     console.print(f"[bold]dichotomise[/bold] processing {source_dir}")
@@ -83,7 +97,7 @@ def cli(
                 source_dir,
                 out_dir,
                 sanitise_requested=sanitise,
-                sanitise_level=sanitise_level,
+                sanitise_level=effective_sanitise_level,
                 label_mode=label_mode,
                 subject_id=subject_id,
                 new_id=new_id,

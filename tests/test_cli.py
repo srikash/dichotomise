@@ -132,3 +132,50 @@ def test_cli_reports_a_plain_error_when_no_dicom_files_are_found(tmp_path: Path)
     assert result.exit_code != 0
     assert "Traceback" not in result.output
     assert "No DICOM files" in result.output
+
+
+def test_cli_random_name_implies_sanitise_with_the_minimal_policy(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(
+        source / "series" / "1.dcm",
+        PatientID="sub-01",
+        PatientName="Doe^Jane^19900101",
+        StudyInstanceUID="study-a",
+    )
+    out_dir = tmp_path / "out"
+
+    result = CliRunner().invoke(
+        cli, ["--source-dir", str(source), "--out-dir", str(out_dir), "--random-name"]
+    )
+
+    assert result.exit_code == 0, result.output
+    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    assert len(archives) == 1
+    # --sanitise wasn't passed explicitly, but --random-name implies it.
+    assert "sub-01" not in archives[0].name
+
+
+def test_cli_random_name_conflicting_with_sanitise_level_is_an_error(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+    out_dir = tmp_path / "out"
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--source-dir",
+            str(source),
+            "--out-dir",
+            str(out_dir),
+            "--random-name",
+            "--sanitise-level",
+            "full",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--random-name" in result.output

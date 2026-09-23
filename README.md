@@ -117,8 +117,9 @@ folder names do not need to be sensible.
 | `--source-dir` (required) | Raw DICOM directory to process. |
 | `--out-dir` (required) | Parent directory for the timestamped output folder. |
 | `--sanitise` | Replace patient identity before final archiving. |
+| `--random-name` | Shortcut for `--sanitise --sanitise-level minimal`: replace the patient name with a random, readable placeholder (e.g. `Abrahall^Gracious`) instead of the plain subject label. Implies `--sanitise`; do not combine with a different `--sanitise-level`. |
 | `--sanitise-mode` | How the replacement label is generated: `default` (derived from a `LAST^FIRST^YYYYMMDD`-shaped patient name), `numerical` (needs `--subject-id`), or `custom` (needs `--new-id`). Inferred from `--subject-id`/`--new-id` if not given. |
-| `--sanitise-level` | Which policy to apply: `default`, `standard` (preferred), `full`, `minimal`, `custom`, or any policy you add yourself — see [Sanitisation](#sanitisation). Defaults to `standard`. |
+| `--sanitise-level` | Which policy to apply: `default`, `standard` (preferred), `full`, `minimal`, `custom`, or any policy you add yourself — see [Sanitisation](#sanitisation). Defaults to `standard` (or `minimal` if `--random-name` is given). |
 | `--subject-id` | Numerical subject ID, for `--sanitise-mode numerical`. |
 | `--new-id` | Exact replacement ID, for `--sanitise-mode custom`. |
 | `--keep-working-files` | Keep the copied and processed DICOM files (`working/`) instead of deleting them once the archives are verified. |
@@ -216,3 +217,23 @@ uv run mypy src
 
 `tests/data/` (real, non-synthetic scan exports used for some tests) is
 gitignored and never committed — it may contain identifying information.
+
+## The dichotomise workflow
+
+```mermaid
+flowchart TD
+    SOURCE["Raw DICOM directory"] --> CAPTURE["capture<br/>Copies the source into working/"]
+    CAPTURE --> ARCHIVE["source_archive<br/>Verified tarball + checksum (source/)"]
+    ARCHIVE --> AUDIT["audit<br/>Structural QA per subject"]
+    AUDIT --> REPORT1["stage-01-report.json"]
+    AUDIT --> SIFT["sift<br/>Splits retained vs review files"]
+    SIFT --> REPORT2["stage-02-report.json"]
+    SIFT --> RECTIFY["rectify<br/>Metadata-sorted, renamed DICOM tree"]
+    RECTIFY --> SANITISE["sanitise (optional, --sanitise)<br/>Replaces patient identity per policy"]
+    RECTIFY --> FINALISE["finalise<br/>Re-verifies output, archives it (archives/)"]
+    SANITISE --> FINALISE
+    FINALISE --> REPORT3["stage-03-report.json"]
+    FINALISE --> ARCHIVES["archives/dichotomised-archive.tar.gz"]
+```
+
+The project is licensed under the MIT License.
