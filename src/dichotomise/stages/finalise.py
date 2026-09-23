@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import pydicom
+
 from dichotomise.errors import FinaliseVerificationError, NotDicomError
 from dichotomise.pydcm.read import read_metadata
 from dichotomise.run import Run
@@ -22,6 +24,39 @@ class FinaliseResult:
     subject: CapturedSubject
     subject_label: str
     archive: Archive
+
+
+def _expected_uncompressed_pixel_bytes(dataset: pydicom.Dataset) -> int | None:
+    """Return the expected uncompressed pixel-data length when it can be calculated."""
+    if not hasattr(dataset, "PixelData"):
+        return None
+    file_meta = getattr(dataset, "file_meta", None)
+    transfer_syntax = getattr(file_meta, "TransferSyntaxUID", None)
+    if transfer_syntax is None or transfer_syntax.is_compressed:
+        return None
+    try:
+        rows = int(dataset.Rows)
+        columns = int(dataset.Columns)
+        samples_per_pixel = int(getattr(dataset, "SamplesPerPixel", 1))
+        bits_allocated = int(dataset.BitsAllocated)
+        frames = int(getattr(dataset, "NumberOfFrames", 1))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    total_bits = rows * columns * samples_per_pixel * bits_allocated * frames
+    return (total_bits + 7) // 8
+
+
+def _verify_uncompressed_pixel_data(path: Path) -> None:
+    """Reject an uncompressed image whose stored pixel data has the wrong length."""
+    dataset = pydicom.dcmread(path, force=False)
+    expected_bytes = _expected_uncompressed_pixel_bytes(dataset)
+    if expected_bytes is None:
+        return
+    actual_bytes = len(dataset.PixelData)
+    if actual_bytes not in (expected_bytes, expected_bytes + 1):
+        raise FinaliseVerificationError(
+            f"Pixel data length in {path} is {actual_bytes} byte(s); expected {expected_bytes}"
+        )
 
 
 def _verify_output_tree(expected_file_count: int, output_dir: Path) -> None:
@@ -46,6 +81,7 @@ def _verify_output_tree(expected_file_count: int, output_dir: Path) -> None:
                 f"{path} could not be read back after processing; the finished output "
                 "may be corrupt"
             ) from error
+        _verify_uncompressed_pixel_data(path)
 
 
 def finalise(
@@ -59,9 +95,9 @@ def finalise(
 
     Archives the sanitised tree if `--sanitise` was used, otherwise the
     rectified tree. Named with the run's timestamp, `subject_label` (the
-    real PatientID, or the replacement label if sanitised), and the scan
-    date/time, so the archive is self-describing even if separated from its
-    run folder.
+    real PatientID, or the replacement label if sanitised), scan date/time,
+    and a per-run study number. The number prevents one study from replacing
+    another when their other filename fields match.
     """
     source_dir = sanitise_result.sanitised_dir if sanitise_result else rectify_result.rectified_dir
     expected_count = len(sanitise_result.files) if sanitise_result else len(rectify_result.files)
@@ -73,7 +109,7 @@ def finalise(
     )
     name = (
         f"{run.timestamp}_{safe_filename_text(subject_label)}_{scan_datetime}"
-        "_dichotomised-archive.tar.gz"
+        f"_study-{subject.output_number:03d}_dichotomised-archive.tar.gz"
     )
     archive_path = run.archives_dir / name
     archive = make_tarball(source_dir, archive_path)

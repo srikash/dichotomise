@@ -7,9 +7,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from dichotomise.errors import NoDicomFilesFoundError, UnsafeSourceError
-from dichotomise.pydcm.read import DicomMetadata, iter_dicom_files, read_metadata
+from dichotomise.errors import NoDicomFilesFoundError
+from dichotomise.pydcm.read import DicomMetadata, iter_dicom_metadata
 from dichotomise.run import Run
+from dichotomise.utils.fs import reject_symlinks
 from dichotomise.utils.text import safe_filename_text
 
 
@@ -23,20 +24,7 @@ class CapturedSubject:
     scan_date: str
     scan_time: str
     directory: Path
-
-
-def _reject_symlinks(source_dir: Path) -> None:
-    """Refuse a source tree containing a symlink.
-
-    A symlink kept in an archive that is meant to preserve the original data
-    unchanged could point outside the source directory entirely; copying it
-    as if it were a normal file would silently pull in unintended content.
-    """
-    if source_dir.is_symlink():
-        raise UnsafeSourceError(f"{source_dir} is a symlink; refusing to copy it")
-    for path in source_dir.rglob("*"):
-        if path.is_symlink():
-            raise UnsafeSourceError(f"{path} is a symlink; refusing to copy the source directory")
+    output_number: int = 1
 
 
 def _subject_folder_name(metadata: DicomMetadata, used_names: dict[str, int]) -> str:
@@ -56,14 +44,13 @@ def capture(source_dir: Path, run: Run) -> list[CapturedSubject]:
     split correctly. A file that cannot be read as DICOM is left behind
     rather than copied.
     """
-    _reject_symlinks(source_dir)
+    reject_symlinks(source_dir)
 
     files_by_subject: dict[tuple[str, str], list[Path]] = defaultdict(list)
     metadata_by_subject: dict[tuple[str, str], DicomMetadata] = {}
-    for path in iter_dicom_files(source_dir):
-        metadata = read_metadata(path)
+    for metadata in iter_dicom_metadata(source_dir):
         key = (metadata.patient_id, metadata.study_instance_uid)
-        files_by_subject[key].append(path)
+        files_by_subject[key].append(metadata.path)
         metadata_by_subject.setdefault(key, metadata)
 
     if not files_by_subject:
@@ -71,7 +58,7 @@ def capture(source_dir: Path, run: Run) -> list[CapturedSubject]:
 
     used_names: dict[str, int] = {}
     captured: list[CapturedSubject] = []
-    for key in sorted(files_by_subject):
+    for output_number, key in enumerate(sorted(files_by_subject), start=1):
         metadata = metadata_by_subject[key]
         folder_name = _subject_folder_name(metadata, used_names)
         destination = run.working_dir / folder_name / "capture"
@@ -87,6 +74,7 @@ def capture(source_dir: Path, run: Run) -> list[CapturedSubject]:
                 scan_date=metadata.study_date,
                 scan_time=metadata.study_time,
                 directory=destination,
+                output_number=output_number,
             )
         )
     return captured

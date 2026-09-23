@@ -11,6 +11,10 @@ class NotDicomError(DichotomiseError):
     """Raised when a file that was expected to be DICOM cannot be read as one."""
 
 
+class InvalidDicomMetadataError(DichotomiseError):
+    """Raised when required DICOM metadata cannot be used by the pipeline."""
+
+
 class DestinationExistsError(DichotomiseError):
     """Raised rather than overwriting a folder or file that already exists."""
 
@@ -20,7 +24,11 @@ class RelabelError(DichotomiseError):
 
 
 class PolicyNotFoundError(DichotomiseError):
-    """Raised when --sanitise-level names a policy file that does not exist."""
+    """Raised when --sanitise-policy names a policy file that does not exist."""
+
+
+class PolicyValidationError(DichotomiseError):
+    """Raised when a sanitisation policy is malformed or inconsistent."""
 
 
 class NoDicomFilesFoundError(DichotomiseError):
@@ -33,6 +41,10 @@ class UnsafeSourceError(DichotomiseError):
 
 class NamingCollisionError(DichotomiseError):
     """Raised when two different scan files would end up with the same rectified name."""
+
+
+class ArchiveVerificationError(DichotomiseError):
+    """Raised when an archive does not match its checksum immediately after creation."""
 
 
 class FinaliseVerificationError(DichotomiseError):

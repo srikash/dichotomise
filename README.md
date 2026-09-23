@@ -70,11 +70,11 @@ working copy.
 
 One command runs the full pipeline, in order:
 
-1. **capture** — copies the raw export into a working folder, grouping files
+1. **source_archive** — archives the complete, untouched scanner export,
+   including non-DICOM files, with a checksum before any processing.
+2. **capture** — copies readable DICOM files into a working folder, grouping files
    by `(PatientID, StudyInstanceUID)` from their own headers, never from
    folder names.
-2. **source_archive** — archives the untouched, captured original, with a
-   checksum, before anything else happens.
 3. **audit** — flags duplicate scan content (by comparing everything except
    each file's own unique ID) and files sitting in the wrong series folder
    (by majority vote of what each folder's own files agree it should
@@ -96,11 +96,22 @@ expert/stage-by-stage command.
 
 ## Installation
 
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
+From a new clone, create the project's virtual environment and install the
+locked dependencies:
+
 ```bash
-pip install -e .
+uv venv
+uv sync
 ```
 
-Requires Python 3.11+.
+This creates `.venv/` in the project directory. Run the command through that
+environment:
+
+```bash
+uv run dichotomise --help
+```
 
 ## Usage
 
@@ -116,12 +127,12 @@ folder names do not need to be sensible.
 |---|---|
 | `--source-dir` (required) | Raw DICOM directory to process. |
 | `--out-dir` (required) | Parent directory for the timestamped output folder. |
-| `--sanitise` | Replace patient identity before final archiving. |
-| `--random-name` | Shortcut for `--sanitise --sanitise-level minimal`: replace the patient name with a random, readable placeholder (e.g. `Abrahall^Gracious`) instead of the plain subject label. Implies `--sanitise`; do not combine with a different `--sanitise-level`. |
-| `--sanitise-mode` | How the replacement label is generated: `default` (derived from a `LAST^FIRST^YYYYMMDD`-shaped patient name), `numerical` (needs `--subject-id`), or `custom` (needs `--new-id`). Inferred from `--subject-id`/`--new-id` if not given. |
-| `--sanitise-level` | Which policy to apply: `default`, `standard` (preferred), `full`, `minimal`, `custom`, or any policy you add yourself — see [Sanitisation](#sanitisation). Defaults to `standard` (or `minimal` if `--random-name` is given). |
-| `--subject-id` | Numerical subject ID, for `--sanitise-mode numerical`. |
-| `--new-id` | Exact replacement ID, for `--sanitise-mode custom`. |
+| `--sanitise` | Replace patient identity before final archiving. This uses `minimal` unless a policy is chosen. |
+| `--sanitise-policy` | JSON policy filename without `.json`: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Implies `--sanitise`. |
+| `--subject-id` | Starting numerical subject ID. Multi-subject runs increment it for each subject. |
+| `--new-id` | Exact replacement ID for one subject. |
+| `--mapping` | One or more inline `current_id:new_id` pairs; comma-separated pairs are accepted. |
+| `--mapping-file` | CSV (`source_id,new_id`) or JSON (`{"source_id": "new_id"}`) mappings for several subjects. |
 | `--keep-working-files` | Keep the copied and processed DICOM files (`working/`) instead of deleting them once the archives are verified. |
 
 ## Output structure
@@ -131,25 +142,27 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 ```text
 <run-timestamp>_dichotomise_outputs/
   source/
-    <run-timestamp>_<PatientID>_<scan-datetime>_source-archive.tar.gz
-    <run-timestamp>_<PatientID>_<scan-datetime>_source-archive.sha256
+    <run-timestamp>_source-export.tar.gz
+    <run-timestamp>_source-export.sha256
   archives/
-    <run-timestamp>_<subject-label>_<scan-datetime>_dichotomised-archive.tar.gz
-    <run-timestamp>_<subject-label>_<scan-datetime>_dichotomised-archive.sha256
+    <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.tar.gz
+    <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.sha256
   working/                   # temporary, removed unless --keep-working-files
+  reports/
+    <subject-label>_<scan-datetime>_study-001/
+      stage-01-report.json
+      stage-02-report.json
+      stage-03-report.json
+  run-status.json             # in_progress, complete, or failed
 ```
 
-Two pieces of the design are agreed but not yet built: a `study-run.json`
-run-status record, and per-subject `reports/<subject-label>_<scan-datetime>/
-stage-01-report.json` (audit) / `stage-02-report.json` (sift) /
-`stage-03-report.json` (finalise) files. Nothing writes these yet — the
-`AuditResult`/`SiftResult`/`FinaliseResult` values each stage already
-returns carry everything a report would need, so adding this is additive,
-not a redesign.
+`run-status.json` lets you distinguish a complete result from one left by a
+failed or interrupted run. It contains no patient details.
 
-A multi-subject run produces one `source/` archive and one `archives/`
-archive **per subject** — each subject's data can be handed off on its own
-without extracting anything from a larger bundle.
+A multi-subject run produces one `source/` archive for the complete scanner
+export and one `archives/` archive per subject — each subject's processed
+data can be handed off on its own without extracting anything from a larger
+bundle.
 
 Every archive/checksum filename embeds the run timestamp, subject
 identifier, and scan date/time itself, not just its parent folder name, so
@@ -158,8 +171,8 @@ folder. `<scan-datetime>` comes from the DICOM `StudyDate`/`StudyTime`
 fields, used as scanned (the scanner's own local time, not converted to
 match the run timestamp's UTC).
 
-`source/` is always named from the real, raw `PatientID` — it is the
-untouched original, sanitised or not. `archives/` and `reports/` use
+`source/` does not use a patient identifier in its filename: it contains the
+complete, untouched scanner export, sanitised or not. `archives/` and `reports/` use
 `<subject-label>`: the real `PatientID`, unless `--sanitise` was used, in
 which case it is the replacement label instead — a sanitised archive's
 *filename* never leaks the real identifier, matching what's inside the
@@ -179,17 +192,17 @@ Five policies ship in `src/dichotomise/pydcm/policies/`:
 
 | Policy | What happens |
 |---|---|
-| `default` | Nothing changed. |
-| `standard` *(the default level)* | Identity, institution, and device-operator fields removed; every UID reissued; birth date scrambled by ±1 year (day/month randomised too); demographic fields (e.g. sex) and all scan-descriptive text (protocol name, series/study description, etc.) kept. |
+| `retain` | Nothing changed. |
+| `standard` | Identity, patient address, accession number, institution, and device-operator fields removed; every UID reissued; birth date scrambled by ±1 year (day/month randomised too); demographic fields (e.g. sex) and all scan-descriptive text (protocol name, series/study description, etc.) kept. |
 | `full` | Everything `standard` does, plus scan-descriptive text and the device serial number also removed. |
-| `minimal` | Everything `standard` does, but the replacement name is a random, readable placeholder in standard `Surname^Firstname` form (e.g. `Abrahall^Gracious`) instead of the plain subject label, and the birth date is simply the scan date rather than scrambled. |
+| `minimal` *(the default level)* | Everything `standard` does, but a generated pseudonym is used for both patient name (`Abrahall^Gracious`) and patient ID/output name (`abrahall_gracious`); the birth date is the scan date rather than scrambled. |
 | `custom` | A worked, commented example for building your own — not used automatically. |
 
 Full detail — including the real scanner-export comparison these were
 built from, the policy file schema, and how to write your own — is in
 [`docs/sanitise-policies.md`](docs/sanitise-policies.md). In short: copy
 `custom.json` to `<your-policy-name>.json` in the same folder, edit it, and
-run with `--sanitise-level <your-policy-name>`.
+run with `--sanitise-policy <your-policy-name>`.
 
 ## Layout
 
@@ -200,7 +213,7 @@ src/dichotomise/
   run.py                 # output paths for one run
   errors.py              # error types
   stages/                 # one file per pipeline stage
-  pydcm/                   # DICOM-specific logic (the only place pydicom is imported)
+  pydcm/                   # DICOM-specific metadata and sanitisation logic
     policies/                # the sanitisation policy JSON files
     names.py                 # a self-contained adjective+surname placeholder-name generator
   utils/                    # generic filesystem/archive/console helpers
@@ -222,8 +235,8 @@ gitignored and never committed — it may contain identifying information.
 
 ```mermaid
 flowchart TD
-    SOURCE["Raw DICOM directory"] --> CAPTURE["capture<br/>Copies the source into working/"]
-    CAPTURE --> ARCHIVE["source_archive<br/>Verified tarball + checksum (source/)"]
+    SOURCE["Raw scanner export"] --> ARCHIVE["source_archive<br/>Verified tarball + checksum (source/)"]
+    ARCHIVE --> CAPTURE["capture<br/>Copies readable DICOM into working/"]
     ARCHIVE --> AUDIT["audit<br/>Structural QA per subject"]
     AUDIT --> REPORT1["stage-01-report.json"]
     AUDIT --> SIFT["sift<br/>Splits retained vs review files"]

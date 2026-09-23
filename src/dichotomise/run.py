@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +33,15 @@ class Run:
     def reports_dir(self) -> Path:
         return self.root / "reports"
 
+    @property
+    def status_path(self) -> Path:
+        """Return the file recording whether this run completed."""
+        return self.root / "run-status.json"
+
+    def set_status(self, status: str) -> None:
+        """Record the current lifecycle status without storing patient information."""
+        self.status_path.write_text(json.dumps({"status": status}) + "\n")
+
 
 def start_run(out_dir: Path, *, now: datetime | None = None) -> Run:
     """Create a new, timestamped run folder under `out_dir` and return its Run.
@@ -47,4 +57,6 @@ def start_run(out_dir: Path, *, now: datetime | None = None) -> Run:
         raise DestinationExistsError(
             f"A run folder already exists for this second: {root}. Wait a moment and try again."
         ) from error
-    return Run(root=root, timestamp=timestamp)
+    run = Run(root=root, timestamp=timestamp)
+    run.set_status("in_progress")
+    return run

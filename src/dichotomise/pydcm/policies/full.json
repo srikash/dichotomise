@@ -14,8 +14,25 @@
       "note": "Matches the DICOM PS3.15 standard confidentiality-profile wording, rather than standard's plain sentence."
     },
     "DeidentificationMethodCodeSequence": {
-      "action": "add",
-      "note": "Formal DICOM code sequence declaring the confidentiality profile applied (code value 113106, DCM coding scheme)."
+      "action": "add_code_sequence",
+      "value": [
+        {
+          "CodeValue": "113100",
+          "CodingSchemeDesignator": "DCM",
+          "CodeMeaning": "Basic Application Confidentiality Profile"
+        },
+        {
+          "CodeValue": "113106",
+          "CodingSchemeDesignator": "DCM",
+          "CodeMeaning": "Retain Longitudinal Temporal Information With Full Dates Option"
+        },
+        {
+          "CodeValue": "113108",
+          "CodingSchemeDesignator": "DCM",
+          "CodeMeaning": "Retain Patient Characteristics Option"
+        }
+      ],
+      "note": "The three codes observed in the scanner's reduced export. This records the scanner-derived policy; it is not an independent claim that every DICOM PS3.15 requirement has been assessed."
     },
     "DeviceSerialNumber": { "action": "remove" },
     "ProtocolName": {

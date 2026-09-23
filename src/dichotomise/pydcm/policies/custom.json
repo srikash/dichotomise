@@ -19,7 +19,7 @@
     "                    label) or <scan-date> (the study's own scan date)",
     "     \"regenerate\" - a new ID, kept the same across every file in the",
     "                    same run (only meaningful for *InstanceUID fields)",
-    "6. Save the file, then run dichotomise with --sanitise-level <your-name>.",
+    "6. Save the file, then run dichotomise with --sanitise-policy <your-name>.",
     "",
     "See docs/sanitise-policies.md for the full write-up and worked examples."
   ],
@@ -29,7 +29,6 @@
   "actions": {
     "ProtocolName": { "action": "keep" },
     "SeriesDescription": { "action": "keep" },
-    "AccessionNumber": { "action": "remove" },
     "ReferringPhysicianName": { "action": "remove" },
     "RequestingPhysician": { "action": "remove" }
   }
