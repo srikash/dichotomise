@@ -38,10 +38,7 @@ def content_hash(path: Path) -> str:
             continue
         if element.keyword == "PixelData":
             continue
-        try:
-            value = str(element.value)
-        except Exception:
-            value = repr(element.value)
+        value = str(element.value)
         parts.append(f"{element.tag}|{element.keyword}|{value}")
     parts.sort()
 
@@ -75,13 +72,13 @@ _T = TypeVar("_T")
 
 
 def _majority(values: Iterable[_T]) -> _T | None:
-    """The most common value, breaking ties by sort order for a stable result."""
+    """Return the only most common value, or None when there is no majority."""
     counts = Counter(values)
     if not counts:
         return None
     top_count = counts.most_common(1)[0][1]
-    tied = sorted(value for value, count in counts.items() if count == top_count)  # type: ignore[type-var]
-    return tied[0]
+    tied = [value for value, count in counts.items() if count == top_count]
+    return tied[0] if len(tied) == 1 else None
 
 
 def find_misfiled_files(files_by_folder: Mapping[str, Sequence[DicomMetadata]]) -> set[Path]:

@@ -6,7 +6,7 @@
     "PatientName": {
       "action": "replace",
       "value": "<subject-label>",
-      "note": "subject-label is the run's replacement label (default/numerical/custom), not the real name."
+      "note": "subject-label is the run's generated, numerical, exact, or mapped replacement label, not the real name."
     },
     "PatientID": {
       "action": "replace",
@@ -28,6 +28,8 @@
       "action": "replace",
       "value": "dichotomise standard sanitisation"
     },
+    "AccessionNumber": { "action": "remove" },
+    "PatientAddress": { "action": "remove" },
     "InstitutionName": { "action": "remove" },
     "InstitutionAddress": { "action": "remove" },
     "InstitutionalDepartmentName": { "action": "remove" },

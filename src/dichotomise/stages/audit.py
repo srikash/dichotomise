@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dichotomise.pydcm.identify import find_duplicate_files, find_misfiled_files
-from dichotomise.pydcm.read import DicomMetadata, iter_dicom_files, read_metadata
+from dichotomise.pydcm.read import DicomMetadata, iter_dicom_metadata
 from dichotomise.stages.capture import CapturedSubject
 
 
@@ -40,8 +40,8 @@ def audit(subject: CapturedSubject) -> AuditResult:
     metadata_by_folder: dict[str, list[DicomMetadata]] = defaultdict(list)
     metadata_by_path: dict[Path, DicomMetadata] = {}
 
-    for path in iter_dicom_files(subject.directory):
-        metadata = read_metadata(path)
+    for metadata in iter_dicom_metadata(subject.directory):
+        path = metadata.path
         metadata_by_path[path] = metadata
         files_by_folder[path.parent].append(path)
         metadata_by_folder[str(path.parent)].append(metadata)

@@ -1,5 +1,5 @@
 {
-  "name": "default",
+  "name": "retain",
   "description": "No changes. Every field is kept exactly as scanned, including patient name, patient ID, birth date, institution, device, and all identifiers. This is what a dichotomise run produces when --sanitise is not used, and is the baseline the standard and full policies are written against.",
   "default_action": "keep",
   "actions": {}

@@ -7,6 +7,8 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from dichotomise.errors import ArchiveVerificationError
+
 
 @dataclass(frozen=True)
 class Archive:
@@ -47,7 +49,10 @@ def make_tarball(source_dir: Path, archive_path: Path) -> Archive:
 
     checksum_path = _checksum_path_for(archive_path)
     checksum_path.write_text(_sha256_of(archive_path) + "\n")
-    return Archive(path=archive_path, checksum_path=checksum_path)
+    archive = Archive(path=archive_path, checksum_path=checksum_path)
+    if not verify_archive(archive.path, archive.checksum_path):
+        raise ArchiveVerificationError(f"Archive verification failed: {archive.path}")
+    return archive
 
 
 def verify_archive(archive_path: Path, checksum_path: Path) -> bool:

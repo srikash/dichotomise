@@ -5,9 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import pydicom
-
-from dichotomise.pydcm.relabel import Policy, apply_policy
+from dichotomise.pydcm.relabel import Policy, sanitise_file
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.rectify import RectifyResult
 
@@ -38,15 +36,14 @@ def sanitise(
     for metadata in rectify_result.files:
         target = sanitised_dir / metadata.path.relative_to(rectify_result.rectified_dir)
         target.parent.mkdir(parents=True, exist_ok=True)
-        dataset = pydicom.dcmread(metadata.path)
-        apply_policy(
-            dataset,
+        sanitise_file(
+            metadata.path,
+            target,
             policy,
             subject_label=subject_label,
             scan_date=rectify_result.subject.scan_date,
             replacement_cache=replacement_cache,
         )
-        dataset.save_as(target)
         files.append(target)
 
     return SanitiseResult(

@@ -1,11 +1,12 @@
 {
   "name": "minimal",
-  "description": "Identical to standard (identity and institution/device-operator removed, UIDs reissued, descriptive text kept), except: the replacement name is a randomly generated, memorable placeholder rather than the plain subject label, and the birth date is simply replaced with the study's own scan date rather than scrambled to a nearby year. A lighter-weight alternative to standard when a distinctive, easy-to-say placeholder name is more useful than preserving an approximate age.",
+  "description": "Identical to standard (identity and institution/device-operator removed, UIDs reissued, descriptive text kept), except: a generated, memorable pseudonym replaces both the patient name and patient ID, and the birth date is simply replaced with the study's own scan date rather than scrambled to a nearby year. This is the default sanitisation policy for workflows that later convert the output to NIfTI.",
   "extends": "standard",
   "actions": {
     "PatientName": {
-      "action": "random_name",
-      "note": "A randomly generated placeholder name, in standard DICOM Surname^Firstname form (e.g. Abrahall^Gracious), from pydcm/names.py. Kept the same across every file for this subject, but not derived from the real name."
+      "action": "replace",
+      "value": "<subject-name>",
+      "note": "The readable form of the generated subject label, in DICOM Surname^Firstname form (e.g. Abrahall^Gracious). PatientID and output names use the same pseudonym in filesystem-safe form (abrahall_gracious)."
     },
     "PatientBirthDate": {
       "action": "replace",

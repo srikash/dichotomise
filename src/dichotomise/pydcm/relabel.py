@@ -6,47 +6,23 @@ import calendar
 import json
 import random
 import re
-from collections.abc import MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pydicom
 from pydicom.dataset import Dataset
+from pydicom.sequence import Sequence
 from pydicom.uid import generate_uid
 
-from dichotomise.errors import PolicyNotFoundError, RelabelError
+from dichotomise.errors import PolicyNotFoundError, PolicyValidationError, RelabelError
 from dichotomise.pydcm.names import generate_name
 
 _POLICIES_DIR = Path(__file__).parent / "policies"
 
 _LABEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _MAX_LABEL_LENGTH = 64
-_DEFAULT_NAME_PATTERN = re.compile(r"(?P<last>[^\^]+)\^(?P<first>[^\^]+)\^(?P<date>\d{8})")
-
-
-def generate_default_label(patient_name: str) -> str:
-    """Derive a replacement label from a name shaped LAST^FIRST^YYYYMMDD.
-
-    Returns the embedded date plus the subject's initials, e.g.
-    "Doe^Jane^19900101" -> "19900101_JD". This is a replacement label, not
-    de-identification: it is predictable from the source name on purpose.
-    """
-    match = _DEFAULT_NAME_PATTERN.fullmatch(patient_name)
-    if match is None:
-        raise RelabelError(
-            "Cannot work out a default replacement label: the patient name must be "
-            "written as LAST^FIRST^YYYYMMDD. Use a numerical or custom replacement ID "
-            "instead."
-        )
-    try:
-        datetime.strptime(match["date"], "%Y%m%d")
-    except ValueError as error:
-        raise RelabelError(
-            "Cannot work out a default replacement label: the date in the patient name "
-            "is not a real date. Use a numerical or custom replacement ID instead."
-        ) from error
-    return f"{match['date']}_{match['last'][0].upper()}{match['first'][0].upper()}"
 
 
 def normalise_numeric_label(value: str) -> str:
@@ -77,34 +53,110 @@ class Policy:
 
     name: str
     actions: dict[str, dict[str, Any]]
+    description: str = ""
+
+
+_ACTIONS_REQUIRING_VALUE = {"replace", "add", "add_code_sequence"}
+_VALID_ACTIONS = {
+    "keep",
+    "remove",
+    "replace",
+    "add",
+    "add_code_sequence",
+    "regenerate",
+    "scramble_date",
+    "random_name",
+}
+
+
+def _validate_actions(policy_name: str, actions: object) -> dict[str, dict[str, Any]]:
+    """Validate policy actions before they are applied to a DICOM dataset."""
+    if not isinstance(actions, dict):
+        raise PolicyValidationError(f"Policy {policy_name!r} needs an actions object.")
+    validated: dict[str, dict[str, Any]] = {}
+    for field, instruction in actions.items():
+        if not isinstance(field, str) or not isinstance(instruction, dict):
+            raise PolicyValidationError(
+                f"Policy {policy_name!r} has an invalid action instruction."
+            )
+        action = instruction.get("action")
+        if not isinstance(action, str) or action not in _VALID_ACTIONS:
+            raise PolicyValidationError(
+                f"Policy {policy_name!r} has an unsupported action for {field}: {action!r}."
+            )
+        if action in _ACTIONS_REQUIRING_VALUE and "value" not in instruction:
+            raise PolicyValidationError(
+                f"Policy {policy_name!r} needs a value for {field}'s {action} action."
+            )
+        if action == "add_code_sequence" and not isinstance(instruction["value"], list):
+            raise PolicyValidationError(
+                f"Policy {policy_name!r} needs a list of codes for {field}."
+            )
+        validated[field] = instruction
+    return validated
 
 
 def load_policy(name: str) -> Policy:
-    """Load one of the bundled policies ("default", "standard", or "full").
+    """Load one of the bundled policies ("retain", "standard", or "full").
 
     "full" is written as "standard" plus a few extra fields (its JSON file's
     "extends" key), so its actions here already include everything
     "standard" does, with "full"'s own entries taking priority where the two
     disagree.
     """
+    return _load_policy(name, ancestors=frozenset())
+
+
+def _load_policy(name: str, *, ancestors: frozenset[str]) -> Policy:
+    if name in ancestors:
+        chain = " -> ".join((*sorted(ancestors), name))
+        raise PolicyValidationError(f"Policy inheritance is circular: {chain}.")
     policy_file = _POLICIES_DIR / f"{name}.json"
     if not policy_file.is_file():
         available = ", ".join(sorted(p.stem for p in _POLICIES_DIR.glob("*.json")))
         raise PolicyNotFoundError(
             f"No sanitisation policy named '{name}'. Available policies: {available}"
         )
-    raw = json.loads(policy_file.read_text())
+    try:
+        raw = json.loads(policy_file.read_text())
+    except json.JSONDecodeError as error:
+        raise PolicyValidationError(f"Policy {name!r} is not valid JSON.") from error
+    if not isinstance(raw, dict) or not isinstance(raw.get("name"), str):
+        raise PolicyValidationError(f"Policy {name!r} needs a string name.")
+    description = raw.get("description", "")
+    if not isinstance(description, str):
+        raise PolicyValidationError(f"Policy {name!r} needs a string description.")
     actions: dict[str, dict[str, Any]] = {}
     base_name = raw.get("extends")
     if base_name is not None:
-        actions.update(load_policy(base_name).actions)
-    actions.update(raw.get("actions", {}))
-    return Policy(name=raw["name"], actions=actions)
+        if not isinstance(base_name, str):
+            raise PolicyValidationError(f"Policy {name!r} has an invalid extends value.")
+        actions.update(_load_policy(base_name, ancestors=ancestors | {name}).actions)
+    actions.update(_validate_actions(name, raw.get("actions", {})))
+    return Policy(name=raw["name"], actions=actions, description=description)
 
 
 def _remove_field(dataset: Dataset, field: str) -> None:
     if hasattr(dataset, field):
         delattr(dataset, field)
+
+
+def _iter_nested_datasets(dataset: Dataset) -> Iterator[Dataset]:
+    """Yield a dataset and every dataset contained in its sequences."""
+    yield dataset
+    for element in dataset:
+        if element.VR != "SQ" or not isinstance(element.value, Sequence):
+            continue
+        for item in element.value:
+            yield from _iter_nested_datasets(item)
+
+
+def _iter_policy_datasets(dataset: Dataset) -> Iterator[Dataset]:
+    """Yield the main dataset, nested datasets, and DICOM file metadata."""
+    yield from _iter_nested_datasets(dataset)
+    file_meta = getattr(dataset, "file_meta", None)
+    if file_meta is not None:
+        yield from _iter_nested_datasets(file_meta)
 
 
 def _replace_field(
@@ -118,8 +170,27 @@ def _replace_field(
     setattr(dataset, field, value)
 
 
+def _add_code_sequence(dataset: Dataset, field: str, instruction: dict[str, Any]) -> None:
+    """Add a DICOM coded sequence from the policy's serialisable code records."""
+    records = instruction.get("value")
+    if not isinstance(records, list):
+        raise RelabelError(f"{field} needs a list of coded values")
+    items = []
+    for record in records:
+        if not isinstance(record, dict):
+            raise RelabelError(f"{field} contains a code that is not an object")
+        item = Dataset()
+        for attribute, value in record.items():
+            setattr(item, attribute, value)
+        items.append(item)
+    setattr(dataset, field, Sequence(items))
+
+
 def _cached_value(
-    dataset: Dataset, field: str, replacement_cache: MutableMapping[str, str], generate: Any
+    dataset: Dataset,
+    field: str,
+    replacement_cache: MutableMapping[str, str],
+    generate: Callable[[str], str],
 ) -> str | None:
     """Return a new value for `field`, generated once and reused for every later call.
 
@@ -180,6 +251,14 @@ def _format_name_part(word: str) -> str:
     return word.capitalize()
 
 
+def format_subject_name(label: str) -> str:
+    """Format a generated ``surname_given`` label as a DICOM person name."""
+    surname, separator, given_name = label.partition("_")
+    if not separator:
+        return _format_name_part(surname)
+    return f"{_format_name_part(surname)}^{_format_name_part(given_name)}"
+
+
 def _generate_person_name() -> str:
     """A random "Surname^Firstname"-style placeholder, in DICOM PN form."""
     given, _, family = generate_name().rpartition("_")
@@ -194,6 +273,46 @@ def _random_name_field(
     )
     if new_value is not None:
         setattr(dataset, field, new_value)
+
+
+def _apply_action(
+    dataset: Dataset,
+    field: str,
+    instruction: dict[str, Any],
+    placeholders: dict[str, str],
+    replacement_cache: MutableMapping[str, str],
+) -> None:
+    action = instruction["action"]
+    if action == "keep":
+        return
+    if action == "remove":
+        _remove_field(dataset, field)
+        return
+    if action in ("replace", "add"):
+        _replace_field(dataset, field, instruction, placeholders)
+        return
+    if action == "add_code_sequence":
+        _add_code_sequence(dataset, field, instruction)
+        return
+    if action == "regenerate":
+        _regenerate_field(dataset, field, replacement_cache)
+        return
+    if action == "scramble_date":
+        _scramble_date_field(dataset, field, replacement_cache)
+        return
+    if action == "random_name":
+        _random_name_field(dataset, field, replacement_cache)
+        return
+    raise RelabelError(f"Unknown sanitisation action for {field}: {action}")
+
+
+def _sync_file_meta_sop_instance_uid(dataset: Dataset) -> None:
+    """Keep the file-meta SOP instance UID aligned with the main dataset."""
+    file_meta = getattr(dataset, "file_meta", None)
+    if file_meta is None or not hasattr(dataset, "SOPInstanceUID"):
+        return
+    if hasattr(file_meta, "MediaStorageSOPInstanceUID"):
+        file_meta.MediaStorageSOPInstanceUID = dataset.SOPInstanceUID
 
 
 def apply_policy(
@@ -211,27 +330,49 @@ def apply_policy(
     in more than one file comes out the same everywhere, rather than a
     different one per file.
     """
-    placeholders = {"<subject-label>": subject_label, "<scan-date>": scan_date}
-    handlers = {
-        "keep": lambda field, instruction: None,
-        "remove": lambda field, instruction: _remove_field(dataset, field),
-        "replace": lambda field, instruction: _replace_field(
-            dataset, field, instruction, placeholders
-        ),
-        "add": lambda field, instruction: _replace_field(dataset, field, instruction, placeholders),
-        "regenerate": lambda field, instruction: _regenerate_field(
-            dataset, field, replacement_cache
-        ),
-        "scramble_date": lambda field, instruction: _scramble_date_field(
-            dataset, field, replacement_cache
-        ),
-        "random_name": lambda field, instruction: _random_name_field(
-            dataset, field, replacement_cache
-        ),
+    placeholders = {
+        "<subject-label>": subject_label,
+        "<subject-name>": format_subject_name(subject_label),
+        "<scan-date>": scan_date,
     }
     for field, instruction in policy.actions.items():
         action = instruction["action"]
-        handler = handlers.get(action)
-        if handler is None:
-            raise RelabelError(f"Unknown sanitisation action for {field}: {action}")
-        handler(field, instruction)
+        for current_dataset in _iter_policy_datasets(dataset):
+            if action in ("add", "add_code_sequence") and current_dataset is not dataset:
+                continue
+            if current_dataset is not dataset and not hasattr(current_dataset, field):
+                continue
+            _apply_action(
+                current_dataset,
+                field,
+                instruction,
+                placeholders,
+                replacement_cache,
+            )
+    _sync_file_meta_sop_instance_uid(dataset)
+
+
+def sanitise_file(
+    source_path: Path,
+    target_path: Path,
+    policy: Policy,
+    *,
+    subject_label: str,
+    scan_date: str,
+    replacement_cache: MutableMapping[str, str],
+) -> None:
+    """Read, sanitise, save, and re-open one DICOM file.
+
+    The caller owns path selection and the shared replacement cache; this
+    function owns all DICOM-specific file handling.
+    """
+    dataset = pydicom.dcmread(source_path)
+    apply_policy(
+        dataset,
+        policy,
+        subject_label=subject_label,
+        scan_date=scan_date,
+        replacement_cache=replacement_cache,
+    )
+    dataset.save_as(target_path)
+    pydicom.dcmread(target_path, stop_before_pixels=True)
