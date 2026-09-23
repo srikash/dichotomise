@@ -1,0 +1,45 @@
+{
+  "name": "standard",
+  "description": "Removes who the subject is and who/where scanned them, and reissues every identifier, while keeping every field that describes what was scanned (protocol names, series/study descriptions, image comments, device identity). This is the preferred level: the output is untraceable to the subject or the scanning site, but still fully readable and usable. Matches the scanner's 'service' export.",
+  "default_action": "keep",
+  "actions": {
+    "PatientName": {
+      "action": "replace",
+      "value": "<subject-label>",
+      "note": "subject-label is the run's replacement label (default/numerical/custom), not the real name."
+    },
+    "PatientID": {
+      "action": "replace",
+      "value": "<subject-label>"
+    },
+    "PatientBirthDate": {
+      "action": "scramble_date",
+      "note": "Replaced with a random valid date exactly one year before or after the real birth date (day and month are also randomised), never the real date. Kept the same across every file for this subject."
+    },
+    "PatientSex": {
+      "action": "keep",
+      "note": "Explicitly preserved: demographic fields like sex are not identifying on their own and are useful for downstream research/QA."
+    },
+    "PatientIdentityRemoved": {
+      "action": "replace",
+      "value": "YES"
+    },
+    "DeidentificationMethod": {
+      "action": "replace",
+      "value": "dichotomise standard sanitisation"
+    },
+    "InstitutionName": { "action": "remove" },
+    "InstitutionAddress": { "action": "remove" },
+    "InstitutionalDepartmentName": { "action": "remove" },
+    "StationName": { "action": "remove" },
+    "OperatorsName": { "action": "remove" },
+    "PerformingPhysicianName": { "action": "remove" },
+    "StudyInstanceUID": {
+      "action": "regenerate",
+      "note": "A new, consistently-applied identifier replaces the original everywhere it appears, including inside nested reference sequences (e.g. DimensionOrganizationSequence, SharedFunctionalGroupsSequence)."
+    },
+    "SeriesInstanceUID": { "action": "regenerate" },
+    "SOPInstanceUID": { "action": "regenerate" },
+    "FrameOfReferenceUID": { "action": "regenerate" }
+  }
+}

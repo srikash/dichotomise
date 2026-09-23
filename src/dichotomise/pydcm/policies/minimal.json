@@ -1,0 +1,16 @@
+{
+  "name": "minimal",
+  "description": "Identical to standard (identity and institution/device-operator removed, UIDs reissued, descriptive text kept), except: the replacement name is a randomly generated, memorable placeholder rather than the plain subject label, and the birth date is simply replaced with the study's own scan date rather than scrambled to a nearby year. A lighter-weight alternative to standard when a distinctive, easy-to-say placeholder name is more useful than preserving an approximate age.",
+  "extends": "standard",
+  "actions": {
+    "PatientName": {
+      "action": "random_name",
+      "note": "A randomly generated adjective_surname placeholder (via funkybob: https://github.com/andreacorbellini/funkybob), kept the same across every file for this subject, but not derived from the real name."
+    },
+    "PatientBirthDate": {
+      "action": "replace",
+      "value": "<scan-date>",
+      "note": "Overrides standard's scramble_date: here the birth date is simply the study's own scan date, not an approximate real one."
+    }
+  }
+}

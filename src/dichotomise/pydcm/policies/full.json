@@ -1,0 +1,39 @@
+{
+  "name": "full",
+  "description": "Everything standard removes, plus every field that describes what was scanned: protocol name, series/study description, image comments, procedure IDs, and device identity. Not the preferred level: a full-policy archive is untraceable, but a clinician can no longer tell which folder holds which scan without opening the images. Matches the scanner's 'reduced' export.",
+  "extends": "standard",
+  "actions": {
+    "DeidentificationMethod": {
+      "action": "replace",
+      "value": [
+        "Deidentified",
+        "Basic Application Confidentiality Profile applied",
+        "Retain Longitudinal Temporal Information With Full Dates Option",
+        "Retain Patient Characteristics Option"
+      ],
+      "note": "Matches the DICOM PS3.15 standard confidentiality-profile wording, rather than standard's plain sentence."
+    },
+    "DeidentificationMethodCodeSequence": {
+      "action": "add",
+      "note": "Formal DICOM code sequence declaring the confidentiality profile applied (code value 113106, DCM coding scheme)."
+    },
+    "DeviceSerialNumber": { "action": "remove" },
+    "ProtocolName": {
+      "action": "replace",
+      "value": "DeIdentified"
+    },
+    "SeriesDescription": { "action": "remove" },
+    "StudyDescription": { "action": "remove" },
+    "ImageComments": { "action": "remove" },
+    "PerformedProcedureStepDescription": { "action": "remove" },
+    "PerformedProcedureStepID": { "action": "remove" },
+    "StudyID": {
+      "action": "replace",
+      "value": ""
+    },
+    "IssuerOfPatientID": { "action": "remove" },
+    "MedicalAlerts": { "action": "remove" },
+    "AdmittingDiagnosesDescription": { "action": "remove" },
+    "AcquisitionContextSequence": { "action": "remove" }
+  }
+}
