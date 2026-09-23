@@ -181,7 +181,7 @@ Five policies ship in `src/dichotomise/pydcm/policies/`:
 | `default` | Nothing changed. |
 | `standard` *(the default level)* | Identity, institution, and device-operator fields removed; every UID reissued; birth date scrambled by ±1 year (day/month randomised too); demographic fields (e.g. sex) and all scan-descriptive text (protocol name, series/study description, etc.) kept. |
 | `full` | Everything `standard` does, plus scan-descriptive text and the device serial number also removed. |
-| `minimal` | Everything `standard` does, but the replacement name is a random, readable placeholder (e.g. `hungry_pike`, via [funkybob](https://github.com/andreacorbellini/funkybob)) instead of the plain subject label, and the birth date is simply the scan date rather than scrambled. |
+| `minimal` | Everything `standard` does, but the replacement name is a random, readable placeholder in standard `Surname^Firstname` form (e.g. `Abrahall^Gracious`) instead of the plain subject label, and the birth date is simply the scan date rather than scrambled. |
 | `custom` | A worked, commented example for building your own — not used automatically. |
 
 Full detail — including the real scanner-export comparison these were
@@ -201,8 +201,8 @@ src/dichotomise/
   stages/                 # one file per pipeline stage
   pydcm/                   # DICOM-specific logic (the only place pydicom is imported)
     policies/                # the sanitisation policy JSON files
+    names.py                 # a self-contained adjective+surname placeholder-name generator
   utils/                    # generic filesystem/archive/console helpers
-  _vendor/                  # small third-party code, copied in rather than pip-installed
 ```
 
 ## Development
@@ -216,12 +216,3 @@ uv run mypy src
 
 `tests/data/` (real, non-synthetic scan exports used for some tests) is
 gitignored and never committed — it may contain identifying information.
-
-`src/dichotomise/_vendor/` holds the source of small third-party packages
-copied directly into the tree (currently
-[funkybob](https://github.com/andreacorbellini/funkybob), MIT licensed —
-see the `LICENSE`/`README.md` in that folder), rather than declared as a
-normal `pip` dependency. This is deliberate for a dependency this small: it
-keeps dichotomise working even if the upstream package or repository ever
-disappears. Don't edit vendored files directly; replace them with a fresh
-copy from upstream instead.

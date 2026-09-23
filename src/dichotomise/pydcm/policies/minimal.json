@@ -5,7 +5,7 @@
   "actions": {
     "PatientName": {
       "action": "random_name",
-      "note": "A randomly generated adjective_surname placeholder (via funkybob: https://github.com/andreacorbellini/funkybob), kept the same across every file for this subject, but not derived from the real name."
+      "note": "A randomly generated placeholder name, in standard DICOM Surname^Firstname form (e.g. Abrahall^Gracious), from pydcm/names.py. Kept the same across every file for this subject, but not derived from the real name."
     },
     "PatientBirthDate": {
       "action": "replace",

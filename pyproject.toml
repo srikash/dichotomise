@@ -31,7 +31,6 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["src/dichotomise/_vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C90", "SIM", "RUF"]
@@ -47,10 +46,6 @@ quote-style = "double"
 strict = true
 disallow_untyped_defs = true
 warn_unused_ignores = true
-
-[[tool.mypy.overrides]]
-module = "dichotomise._vendor.*"
-ignore_errors = true
 
 [dependency-groups]
 dev = [

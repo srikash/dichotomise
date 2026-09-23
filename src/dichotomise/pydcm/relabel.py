@@ -15,8 +15,8 @@ from typing import Any
 from pydicom.dataset import Dataset
 from pydicom.uid import generate_uid
 
-from dichotomise._vendor.funkybob import RandomNameGenerator
 from dichotomise.errors import PolicyNotFoundError, RelabelError
+from dichotomise.pydcm.names import generate_name
 
 _POLICIES_DIR = Path(__file__).parent / "policies"
 
@@ -167,14 +167,30 @@ def _scramble_date_field(
         setattr(dataset, field, new_value)
 
 
+def _format_name_part(word: str) -> str:
+    """Title-case one name-generator word, e.g. "gracious" -> "Gracious".
+
+    A "Mc"-prefixed surname (none currently in pydcm/names.py's list, but
+    kept in case one is added later) needs that prefix capitalised specially
+    rather than a plain str.capitalize(), e.g. "mclean" -> "McLean" rather
+    than "Mclean".
+    """
+    if word.startswith("mc") and len(word) > 2:
+        return "Mc" + word[2:].capitalize()
+    return word.capitalize()
+
+
+def _generate_person_name() -> str:
+    """A random "Surname^Firstname"-style placeholder, in DICOM PN form."""
+    given, _, family = generate_name().rpartition("_")
+    return f"{_format_name_part(family)}^{_format_name_part(given)}"
+
+
 def _random_name_field(
     dataset: Dataset, field: str, replacement_cache: MutableMapping[str, str]
 ) -> None:
     new_value = _cached_value(
-        dataset,
-        field,
-        replacement_cache,
-        lambda _original: next(iter(RandomNameGenerator())),  # type: ignore[no-untyped-call]
+        dataset, field, replacement_cache, lambda _original: _generate_person_name()
     )
     if new_value is not None:
         setattr(dataset, field, new_value)

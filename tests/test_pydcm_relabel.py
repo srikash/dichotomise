@@ -220,6 +220,28 @@ def test_apply_policy_random_name_replaces_with_a_generated_name() -> None:
     assert dataset.PatientName  # non-empty
 
 
+def test_apply_policy_random_name_is_formatted_last_caret_first_and_title_cased() -> None:
+    policy = Policy(name="test", actions={"PatientName": {"action": "random_name"}})
+    dataset = _dataset(PatientName="Doe^Jane^19900101")
+
+    apply_policy(
+        dataset, policy, subject_label="sub-0005", scan_date="20260914", replacement_cache={}
+    )
+
+    last, caret, first = str(dataset.PatientName).partition("^")
+    assert caret == "^"
+    assert last and last[0].isupper()
+    assert first and first[0].isupper() and first[1:].islower()
+
+
+def test_random_name_title_cases_mc_surnames_correctly() -> None:
+    from dichotomise.pydcm.relabel import _format_name_part
+
+    assert _format_name_part("mclean") == "McLean"
+    assert _format_name_part("mccarthy") == "McCarthy"
+    assert _format_name_part("gracious") == "Gracious"
+
+
 def test_apply_policy_random_name_is_consistent_across_files() -> None:
     cache: dict[str, str] = {}
     first = _dataset(PatientName="Doe^Jane^19900101")

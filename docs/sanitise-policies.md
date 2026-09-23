@@ -72,8 +72,10 @@ An action is one of:
   in `standard`/`full`: an approximate age survives (useful for research),
   the exact birth date does not.
 - `"random_name"` — replaced with a randomly generated, readable placeholder
-  name (via [funkybob](https://github.com/andreacorbellini/funkybob), e.g.
-  `hungry_pike`), unrelated to the real name.
+  name, formatted as standard DICOM PN (`Surname^Firstname`, e.g.
+  `Abrahall^Gracious`), via `pydcm/names.py`'s own `generate_name()`
+  (adjective + surname, unrelated to the real name). See "The name
+  generator" below.
 
 `"regenerate"`, `"scramble_date"`, and `"random_name"` are all **consistent
 within one subject's run**: the same original value (the same person's real
@@ -95,13 +97,34 @@ only reads `name`, `description`, `extends`, and `actions`), there purely
 for a person opening the file in a text editor. `custom.json` uses this to
 explain, in place, how to build a new policy.
 
+## The name generator
+
+`pydcm/names.py`'s `generate_name()` produces the `random_name` action's
+placeholder: one adjective plus one surname, joined by `_` (e.g.
+`gracious_abrahall`), which `pydcm/relabel.py` then reformats into DICOM PN
+form (`Abrahall^Gracious`). This is entirely our own code and our own word
+lists — not a third-party package.
+
+**100 adjectives × 1000 surnames = 100,000 possible unique names.**
+
+The surnames are a hand-gathered sample of real British surnames from the
+Guild of One-Name Studies' public index,
+<https://one-name.org/surnames_A-Z/> — one page per letter of the alphabet
+(the Guild's own "A" page alone lists over 250; only a sample was taken per
+letter, for a manageable, still-large list). Multi-word and hyphenated
+entries (e.g. "Ab Adam", "Audley-Charles") were excluded, to match the
+plain single-word style the rest of the scheme uses. Some letters (Q, U, X,
+Z) end up with far fewer surnames than others — that reflects real registry
+sparsity, not a sampling mistake, and was kept rather than padded out with
+invented names.
+
 ## Five policies
 
 | Policy | Matches | What happens |
 |---|---|---|
 | `default.json` | scanner's `default_export` | nothing changed |
 | `standard.json` | scanner's `service_export` | identity + institution/device-operator removed, UIDs reissued, birth date scrambled by ±1 year (day/month randomised too), demographic fields (e.g. sex) and descriptive text kept |
-| `minimal.json` | (worked example, not a scanner export) | extends `standard`, but the replacement name is a random placeholder (e.g. `hungry_pike`) instead of the plain subject label, and the birth date is simply the scan date rather than scrambled — a lighter-weight alternative when a distinctive placeholder name matters more than keeping an approximate age |
+| `minimal.json` | (worked example, not a scanner export) | extends `standard`, but the replacement name is a random placeholder in `Surname^Firstname` form (e.g. `McLean^Gracious`) instead of the plain subject label, and the birth date is simply the scan date rather than scrambled — a lighter-weight alternative when a distinctive placeholder name matters more than keeping an approximate age |
 | `full.json` | scanner's `reduced_export` | everything `standard` does, plus descriptive text and device serial number removed |
 | `custom.json` | (worked example, not a scanner export) | a template for a non-expert to copy: extends `full` but keeps protocol/series descriptions, and additionally removes accession number and referring/requesting physician — fields none of the other four touch |
 
