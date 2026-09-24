@@ -34,7 +34,7 @@ data. The DICOM header supplies one; the exported filename hides it from
 ordinary file operations. BIDS takes the opposite approach to filenames: its
 applicable entities identify the data within the filename itself.
 
-### The export violates four principles of reliable data handling
+### The export violates basic principles of reliable data handling
 
 1. **Give each file a usable identity.** XA60+ assigns the same name to
    unrelated DICOMs. A file separated from its folder cannot be identified by
@@ -45,23 +45,26 @@ applicable entities identify the data within the filename itself.
 2. **Keep the file and its context in agreement.** The export uses a series
    folder to provide context that the filename lacks. If that folder
    contradicts the DICOM header, the name offers no independent clue.
-   [Incident 1](#incident-1-dicom-placed-in-the-wrong-series) shows that this
-   disagreement occurred in an export with no user intervention.
+   
+   [Example Incident 1](#incident-1-dicom-placed-in-the-wrong-series) shows that this
+   disagreement occurred in a single export with no user intervention.
 
-3. **Make collisions visible before they cost data.** When exports are
+4. **Make collisions visible before they cost data.** When exports are
    combined, flattened or restored into one directory, repeated names
    collide. Depending on the operation and its settings, a collision can
    overwrite a file or stop the transfer. Either way, the filename cannot
    distinguish the DICOMs involved. Safe reuse demands an explicit identity
    check, not trust in the exported names.
 
-4. **Preserve the evidence needed to audit and reuse data.** Matching
+5. **Preserve the evidence needed to audit and reuse data.** Matching
    filenames do not establish that two DICOMs contain the same instance or
    the same scan content. Counters alone cannot verify completeness, detect a
    misplaced instance or establish where a file came from. FAIR **R1.2**
    calls for detailed provenance; losing a file's folder context makes that
    provenance harder to recover from the export, even though metadata remains
-   in the DICOM. [Incident 2](#incident-2-interleaved-dwi-duplication) shows
+   in the DICOM.
+
+   [Example Incident 2](#incident-2-interleaved-dwi-duplication) shows
    why a plausible filename sequence cannot serve as an audit.
 
 ### Two incidents found by inspecting scanner exports
