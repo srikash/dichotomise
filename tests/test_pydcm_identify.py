@@ -7,7 +7,14 @@ from pathlib import Path
 from dichotomise.pydcm.identify import content_hash, find_duplicate_files, find_misfiled_files
 from dichotomise.pydcm.read import DicomMetadata, iter_dicom_files, read_metadata
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = (
+    Path(__file__).parent
+    / "data"
+    / "reduced_export"
+    / "ANONPHA_ANONPHA_20260914"
+    / "_20260914_133853.300000_6"
+    / "_99_SR_1"
+)
 
 
 def _metadata(path: Path, **overrides: object) -> DicomMetadata:

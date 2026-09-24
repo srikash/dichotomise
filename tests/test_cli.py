@@ -25,6 +25,8 @@ def test_cli_runs_end_to_end_and_reports_the_archives(
     assert "DICOM inventory" in result.output
     assert "Series folder" in result.output
     assert "Pass" in result.output
+    assert "Started: Archiving source DICOMs" in result.output
+    assert "Completed: Study 1: creating verified archive" in result.output
     assert "Audit and archive summary" in result.output
 
 

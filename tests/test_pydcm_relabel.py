@@ -258,11 +258,12 @@ def test_apply_policy_random_name_is_consistent_across_files() -> None:
     assert first.PatientName == second.PatientName
 
 
-def test_load_policy_minimal_keeps_standards_removals_but_overrides_name_and_dob() -> None:
+def test_load_policy_minimal_keeps_standards_removals_and_uses_the_subject_pseudonym() -> None:
     policy = load_policy("minimal")
 
     assert policy.actions["InstitutionName"]["action"] == "remove"  # inherited from standard
-    assert policy.actions["PatientName"]["action"] == "random_name"  # minimal's own override
+    assert policy.actions["PatientName"]["action"] == "replace"
+    assert policy.actions["PatientName"]["value"] == "<subject-name>"
     assert policy.actions["PatientBirthDate"]["action"] == "replace"
     assert policy.actions["PatientBirthDate"]["value"] == "<scan-date>"
 

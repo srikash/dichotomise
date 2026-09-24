@@ -65,8 +65,8 @@ def test_rectify_copies_retained_files_into_their_agreed_names(tmp_path: Path) -
 
     result = rectify(sift_result)
 
-    expected_a = result.rectified_dir / "021-DWI" / "021_series-dwi_0001_e01.dcm"
-    expected_b = result.rectified_dir / "021-DWI" / "021_series-dwi_0002_e01.dcm"
+    expected_a = result.rectified_dir / "021-diffusion" / "021_series-dwi_0001_e01.dcm"
+    expected_b = result.rectified_dir / "021-diffusion" / "021_series-dwi_0002_e01.dcm"
     assert expected_a.read_bytes() == b"first"
     assert expected_b.read_bytes() == b"second"
     assert {f.path for f in result.files} == {expected_a, expected_b}

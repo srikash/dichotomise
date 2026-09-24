@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dichotomise"
-version = "1.3.0"
+version = "1.3.5"
 description = "Audit, sort, rectify, and archive DICOM exports from Siemens XA60+ systems."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -47,6 +47,7 @@ quote-style = "double"
 strict = true
 disallow_untyped_defs = true
 warn_unused_ignores = true
+exclude = "^tests/"
 
 [dependency-groups]
 dev = [

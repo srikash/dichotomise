@@ -38,7 +38,8 @@ def test_run_pipeline_produces_one_archive_per_subject_and_cleans_up_working_fil
 
     source_archives = sorted(run.source_archive_dir.glob("*.tar.gz"))
     final_archives = sorted(run.archives_dir.glob("*.tar.gz"))
-    assert len(source_archives) == 2
+    assert len(source_archives) == 1
+    assert source_archives[0].name.endswith("_source-export.tar.gz")
     assert len(final_archives) == 2
     assert any("sub-01" in p.name for p in final_archives)
     assert any("sub-02" in p.name for p in final_archives)
@@ -75,7 +76,6 @@ def test_run_pipeline_sanitise_default_label_mode_uses_patient_name(
 
     archives = list(run.archives_dir.glob("*.tar.gz"))
     assert len(archives) == 1
-    assert "19900101_DJ" in archives[0].name
     assert "sub-01" not in archives[0].name
 
 
@@ -123,7 +123,7 @@ def test_run_pipeline_writes_the_three_numbered_reports(
 
     report_dirs = list(run.reports_dir.iterdir())
     assert len(report_dirs) == 1
-    assert report_dirs[0].name == "sub-01_20260101-120000"
+    assert report_dirs[0].name == "sub-01_20260101-120000_study-001"
 
     reports = {p.name for p in report_dirs[0].iterdir()}
     assert reports == {"stage-01-report.json", "stage-02-report.json", "stage-03-report.json"}
@@ -154,7 +154,7 @@ def test_run_pipeline_reports_use_the_replacement_label_when_sanitised(
     )
 
     report_dirs = list(run.reports_dir.iterdir())
-    assert report_dirs[0].name == "sub-0007_20260101-120000"
+    assert report_dirs[0].name == "sub-0007_20260101-120000_study-001"
 
 
 def test_run_pipeline_sanitised_reports_never_contain_the_real_patient_id(

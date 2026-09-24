@@ -7,6 +7,8 @@ from contextlib import contextmanager
 
 from rich.console import Console
 
+__all__ = ["Console", "console", "error", "status", "success"]
+
 console = Console()
 
 

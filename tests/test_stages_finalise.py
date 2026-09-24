@@ -39,7 +39,7 @@ def test_finalise_archives_the_rectified_tree_when_not_sanitising(
 
     result = finalise(rectify_result, run, subject_label="sub-01")
 
-    expected_name = "20260922T143012Z_sub-01_20260101-120000_dichotomised-archive"
+    expected_name = "20260922T143012Z_sub-01_20260101-120000_study-001_dichotomised-archive"
     assert result.archive.path == run.archives_dir / f"{expected_name}.tar.gz"
     assert verify_archive(result.archive.path, result.archive.checksum_path) is True
 

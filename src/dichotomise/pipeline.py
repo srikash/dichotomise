@@ -5,6 +5,8 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from time import monotonic
+from typing import TypeVar
 
 from dichotomise.errors import RelabelError
 from dichotomise.pydcm.names import generate_name
@@ -23,6 +25,25 @@ from dichotomise.stages.sanitise import sanitise
 from dichotomise.stages.sift import sift
 from dichotomise.stages.source_archive import source_archive
 from dichotomise.utils.text import safe_filename_text
+
+_T = TypeVar("_T")
+StageCallback = Callable[[str, str, float], None]
+
+
+def _run_stage(description: str, operation: Callable[[], _T], on_stage: StageCallback | None) -> _T:
+    """Run a pipeline stage and report its lifecycle to an optional caller."""
+    if on_stage is not None:
+        on_stage("started", description, 0.0)
+    started = monotonic()
+    try:
+        result = operation()
+    except BaseException:
+        if on_stage is not None:
+            on_stage("failed", description, monotonic() - started)
+        raise
+    if on_stage is not None:
+        on_stage("completed", description, monotonic() - started)
+    return result
 
 
 def _random_subject_label(used_labels: set[str]) -> str:
@@ -88,6 +109,7 @@ def _process_subject(
     subject_mappings: Mapping[str, str] | None,
     used_labels: set[str],
     on_audit: Callable[[AuditResult], None] | None,
+    on_stage: StageCallback | None,
 ) -> None:
     # The replacement label depends only on `subject` and the CLI's own
     # inputs, not on anything audit/sift/rectify produce, so it can be
@@ -100,23 +122,36 @@ def _process_subject(
         )
     reports_dir = _reports_dir_for(run, subject, subject_label)
 
-    audit_result = audit(subject)
+    subject_prefix = f"Study {subject.output_number}"
+    audit_result = _run_stage(f"{subject_prefix}: auditing", lambda: audit(subject), on_stage)
     if on_audit is not None:
         on_audit(audit_result)
     write_audit_report(audit_result, reports_dir, subject_label=subject_label)
 
-    sift_result = sift(audit_result)
+    sift_result = _run_stage(
+        f"{subject_prefix}: sorting review files", lambda: sift(audit_result), on_stage
+    )
     write_sift_report(sift_result, reports_dir)
 
-    rectify_result = rectify(sift_result)
+    rectify_result = _run_stage(
+        f"{subject_prefix}: rectifying retained files", lambda: rectify(sift_result), on_stage
+    )
 
     sanitise_result = None
     if sanitise_requested:
         policy = load_policy(sanitise_level)
-        sanitise_result = sanitise(rectify_result, policy=policy, subject_label=subject_label)
+        sanitise_result = _run_stage(
+            f"{subject_prefix}: sanitising files",
+            lambda: sanitise(rectify_result, policy=policy, subject_label=subject_label),
+            on_stage,
+        )
 
-    finalise_result = finalise(
-        rectify_result, run, subject_label=subject_label, sanitise_result=sanitise_result
+    finalise_result = _run_stage(
+        f"{subject_prefix}: creating verified archive",
+        lambda: finalise(
+            rectify_result, run, subject_label=subject_label, sanitise_result=sanitise_result
+        ),
+        on_stage,
     )
     file_count = len(sanitise_result.files) if sanitise_result else len(rectify_result.files)
     write_finalise_report(
@@ -140,6 +175,7 @@ def run_pipeline(
     subject_mappings: Mapping[str, str] | None = None,
     keep_working_files: bool = False,
     on_audit: Callable[[AuditResult], None] | None = None,
+    on_stage: StageCallback | None = None,
 ) -> Run:
     """Run the full dichotomise pipeline over every subject found under `source_dir`.
 
@@ -149,8 +185,10 @@ def run_pipeline(
     """
     run = start_run(out_dir)
     try:
-        source_archive(source_dir, run)
-        subjects = capture(source_dir, run)
+        _run_stage("Archiving source DICOMs", lambda: source_archive(source_dir, run), on_stage)
+        subjects = _run_stage(
+            "Capturing DICOMs by study", lambda: capture(source_dir, run), on_stage
+        )
         if new_id is not None and len(subjects) != 1:
             raise RelabelError("--new-id may only be used when the source contains one subject.")
         if subject_mappings is not None:
@@ -174,9 +212,10 @@ def run_pipeline(
                 subject_mappings=subject_mappings,
                 used_labels=used_labels,
                 on_audit=on_audit,
+                on_stage=on_stage,
             )
         if not keep_working_files:
-            shutil.rmtree(run.working_dir)
+            _run_stage("Cleaning working files", lambda: shutil.rmtree(run.working_dir), on_stage)
     except BaseException:
         run.set_status("failed")
         raise

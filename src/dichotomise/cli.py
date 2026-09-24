@@ -21,7 +21,7 @@ from rich_click.rich_command import RichCommand
 from dichotomise.errors import DichotomiseError
 from dichotomise.pipeline import run_pipeline
 from dichotomise.stages.audit import AuditedFile, AuditResult
-from dichotomise.utils.console import console, error, status, success
+from dichotomise.utils.console import console, error, success
 
 rich_click_config.OPTION_GROUPS = {
     "dichotomise": [
@@ -67,6 +67,26 @@ class DichotomiseCommand(RichCommand):
             padding=(0, 1),
         )
         formatter.write(Padding(panel, formatter.config.padding_epilog))
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format a stage duration for a concise CLI progress message."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, remaining_seconds = divmod(int(seconds), 60)
+    return f"{minutes}m {remaining_seconds}s"
+
+
+def _log_stage(status: str, description: str, elapsed_seconds: float) -> None:
+    """Render the pipeline's timestamped stage progress in the v1 CLI style."""
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if status == "started":
+        message = f"Started: {description}"
+    elif status == "completed":
+        message = f"Completed: {description} in {_format_elapsed(elapsed_seconds)}"
+    else:
+        message = f"Failed: {description} after {_format_elapsed(elapsed_seconds)}"
+    console.print(f"[dim]{timestamp}[/] {message}")
 
 
 def _audit_reasons(files: list[AuditedFile]) -> list[str]:
@@ -327,19 +347,19 @@ def cli(
 
     console.print(f"[bold]dichotomise[/bold] processing {source_dir}")
     try:
-        with status("Processing..."):
-            run = run_pipeline(
-                source_dir,
-                out_dir,
-                sanitise_requested=sanitise,
-                sanitise_level=effective_sanitise_policy,
-                label_mode=label_mode,
-                subject_id=subject_id,
-                new_id=new_id,
-                subject_mappings=subject_mappings,
-                keep_working_files=keep_working_files,
-                on_audit=_print_audit_table,
-            )
+        run = run_pipeline(
+            source_dir,
+            out_dir,
+            sanitise_requested=sanitise,
+            sanitise_level=effective_sanitise_policy,
+            label_mode=label_mode,
+            subject_id=subject_id,
+            new_id=new_id,
+            subject_mappings=subject_mappings,
+            keep_working_files=keep_working_files,
+            on_audit=_print_audit_table,
+            on_stage=_log_stage,
+        )
     except DichotomiseError as failure:
         error(str(failure))
         raise SystemExit(1) from failure
