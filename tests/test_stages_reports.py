@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.stages.audit import AuditedFile, AuditResult
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.finalise import FinaliseResult
+from dichotomise.stages.rectify import RectifyResult
 from dichotomise.stages.reports import write_audit_report, write_finalise_report, write_sift_report
 from dichotomise.stages.sift import ReviewFile, SiftResult
 from dichotomise.utils.archive import Archive
@@ -124,3 +126,57 @@ def test_write_finalise_report_records_the_archive_and_sanitise_state(tmp_path: 
     assert data["file_count"] == 3
     assert data["sanitised"] is True
     assert data["sanitise_level"] == "standard"
+
+
+def test_write_finalise_report_includes_first_dicom_names_for_each_series(tmp_path: Path) -> None:
+    capture_dir = tmp_path / "capture"
+    subject = _subject(capture_dir)
+    original_file = _metadata(capture_dir / "raw-series" / "IM-0001-0001.dcm")
+    rectified_dir = tmp_path / "rectify"
+    rectified_file = replace(
+        original_file,
+        path=rectified_dir / "021_diffusion" / "021_series-a_0001_e01.dcm",
+    )
+    audit_result = AuditResult(
+        subject=subject,
+        files=[AuditedFile(original_file, is_duplicate=False, is_misfiled=False)],
+    )
+    rectify_result = RectifyResult(
+        subject=subject,
+        rectified_dir=rectified_dir,
+        files=[rectified_file],
+    )
+    archive_path = tmp_path / "archives" / "run_sub-01_archive.tar.gz"
+    checksum_path = tmp_path / "archives" / "run_sub-01_archive.sha256"
+    archive_path.parent.mkdir(parents=True)
+    archive_path.write_bytes(b"fake archive")
+    checksum_path.write_text("abc123\n")
+    finalise_result = FinaliseResult(
+        subject=subject,
+        subject_label="sub-01",
+        archive=Archive(path=archive_path, checksum_path=checksum_path),
+    )
+
+    report_path = write_finalise_report(
+        finalise_result,
+        tmp_path / "reports",
+        file_count=1,
+        sanitised=False,
+        sanitise_level=None,
+        audit_result=audit_result,
+        rectify_result=rectify_result,
+    )
+
+    data = json.loads(report_path.read_text())
+    assert data["series_inventory"] == [
+        {
+            "series_number": 21,
+            "series_description": "diffusion",
+            "series_instance_uid": "series-a",
+            "source_file_count": 1,
+            "archived_file_count": 1,
+            "review_file_count": 0,
+            "first_dicom_before": "IM-0001-0001.dcm",
+            "first_dicom_after": "021_series-a_0001_e01.dcm",
+        }
+    ]

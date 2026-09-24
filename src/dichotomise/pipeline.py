@@ -160,6 +160,9 @@ def _process_subject(
         file_count=file_count,
         sanitised=sanitise_requested,
         sanitise_level=sanitise_level if sanitise_requested else None,
+        audit_result=audit_result,
+        rectify_result=rectify_result,
+        sanitise_result=sanitise_result,
     )
 
 
