@@ -34,7 +34,7 @@ data. The DICOM header supplies one; the exported filename hides it from
 ordinary file operations. BIDS takes the opposite approach to filenames: its
 applicable entities identify the data within the filename itself.
 
-### The export violates basic principles of reliable data handling
+### The new export style violates basic principles of reliable data handling
 
 1. **Give each file a usable identity.** XA60+ assigns the same name to
    unrelated DICOMs. A file separated from its folder cannot be identified by
