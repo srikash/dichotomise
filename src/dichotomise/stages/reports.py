@@ -7,11 +7,12 @@ docs/sanitise-policies.md and README.md for the reports/ folder layout.
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
 from dichotomise.pydcm.read import DicomMetadata
-from dichotomise.stages.audit import AuditedFile, AuditResult
+from dichotomise.stages.audit import AuditedFile, AuditResult, metadata_inconsistencies
 from dichotomise.stages.finalise import FinaliseResult
 from dichotomise.stages.rectify import RectifyResult
 from dichotomise.stages.sanitise import SanitiseResult
@@ -29,6 +30,51 @@ def _write(reports_dir: Path, filename: str, data: dict[str, object]) -> Path:
     return report_path
 
 
+def _audit_series_rows(audit_result: AuditResult) -> list[dict[str, str | int]]:
+    """Summarise structural and metadata findings for each physical DICOM folder."""
+    files_by_folder: dict[Path, list[AuditedFile]] = {}
+    for audited_file in audit_result.files:
+        files_by_folder.setdefault(audited_file.metadata.path.parent, []).append(audited_file)
+
+    rows: list[dict[str, str | int]] = []
+    for folder, files in sorted(files_by_folder.items()):
+        inconsistencies = metadata_inconsistencies(files)
+        duplicate_count = sum(file.is_duplicate for file in files)
+        misfiled_count = sum(file.is_misfiled for file in files)
+        rows.append(
+            {
+                "series_folder": folder.name,
+                "dicom_count": len(files),
+                "duplicate_count": duplicate_count,
+                "misfiled_count": misfiled_count,
+                "metadata_inconsistencies": "; ".join(inconsistencies),
+                "status": "flagged"
+                if duplicate_count or misfiled_count or inconsistencies
+                else "pass",
+            }
+        )
+    return rows
+
+
+def _write_audit_csv(reports_dir: Path, rows: list[dict[str, str | int]]) -> Path:
+    """Write the spreadsheet-friendly audit inventory alongside its JSON report."""
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = reports_dir / "stage-01-audit.csv"
+    fieldnames = [
+        "series_folder",
+        "dicom_count",
+        "duplicate_count",
+        "misfiled_count",
+        "metadata_inconsistencies",
+        "status",
+    ]
+    with report_path.open("w", newline="") as report_file:
+        writer = csv.DictWriter(report_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return report_path
+
+
 def write_audit_report(audit_result: AuditResult, reports_dir: Path, *, subject_label: str) -> Path:
     """Write stage-01-report.json: what the structural checks found.
 
@@ -38,19 +84,29 @@ def write_audit_report(audit_result: AuditResult, reports_dir: Path, *, subject_
     PatientID and this report can sit inside a sanitised run's reports/
     folder.
     """
-    base = audit_result.subject.directory
-    duplicates = [_relative(f.metadata.path, base) for f in audit_result.files if f.is_duplicate]
-    misfiled = [_relative(f.metadata.path, base) for f in audit_result.files if f.is_misfiled]
+    series_rows = _audit_series_rows(audit_result)
+    duplicates = sorted(
+        {file.metadata.path.parent.name for file in audit_result.files if file.is_duplicate}
+    )
+    misfiled = sorted(
+        {file.metadata.path.parent.name for file in audit_result.files if file.is_misfiled}
+    )
     data = {
         "stage": "audit",
         "subject_label": subject_label,
         "total_files": len(audit_result.files),
-        "duplicate_count": len(duplicates),
-        "misfiled_count": len(misfiled),
+        "duplicate_count": sum(file.is_duplicate for file in audit_result.files),
+        "misfiled_count": sum(file.is_misfiled for file in audit_result.files),
         "duplicates": duplicates,
         "misfiled": misfiled,
+        "metadata_inconsistency_count": sum(
+            bool(row["metadata_inconsistencies"]) for row in series_rows
+        ),
+        "series": series_rows,
     }
-    return _write(reports_dir, "stage-01-report.json", data)
+    report_path = _write(reports_dir, "stage-01-report.json", data)
+    _write_audit_csv(reports_dir, series_rows)
+    return report_path
 
 
 def write_sift_report(sift_result: SiftResult, reports_dir: Path) -> Path:

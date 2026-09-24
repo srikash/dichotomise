@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from dichotomise.pydcm.identify import find_duplicate_files, find_misfiled_files
 from dichotomise.pydcm.read import DicomMetadata, iter_dicom_metadata
 from dichotomise.stages.capture import CapturedSubject
+
+_CONSISTENCY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("PatientID", "patient_id"),
+    ("PatientName", "patient_name"),
+    ("StudyInstanceUID", "study_instance_uid"),
+    ("StudyDate", "study_date"),
+    ("StudyTime", "study_time"),
+    ("SeriesInstanceUID", "series_instance_uid"),
+    ("SeriesNumber", "series_number"),
+    ("SeriesDescription", "series_description"),
+    ("ProtocolName", "protocol_name"),
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +39,15 @@ class AuditResult:
 
     subject: CapturedSubject
     files: list[AuditedFile]
+
+
+def metadata_inconsistencies(files: Sequence[AuditedFile]) -> list[str]:
+    """Return identity and series fields whose values differ within one folder."""
+    return [
+        label
+        for label, attribute in _CONSISTENCY_FIELDS
+        if len({getattr(file.metadata, attribute) for file in files}) > 1
+    ]
 
 
 def audit(subject: CapturedSubject) -> AuditResult:

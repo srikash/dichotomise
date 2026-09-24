@@ -45,12 +45,13 @@ def test_cli_audit_table_reports_metadata_and_structural_findings(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
+    series_folder = source / "nested-export" / "study-20260914" / "BTO_hires_fieldmap"
     first_file = make_dicom_file(
-        source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a"
+        series_folder / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a"
     )
-    shutil.copy2(first_file, source / "series" / "2.dcm")
+    shutil.copy2(first_file, series_folder / "2.dcm")
     make_dicom_file(
-        source / "series" / "3.dcm",
+        series_folder / "3.dcm",
         PatientID="sub-01",
         StudyInstanceUID="study-a",
         SeriesNumber=2,
@@ -64,6 +65,8 @@ def test_cli_audit_table_reports_metadata_and_structural_findings(
 
     assert result.exit_code == 0, result.output
     assert "Failed" in result.output
+    assert "BTO_hires_fieldmap" in result.output
+    assert "nested-export/study-20260914" not in result.output
 
 
 def test_cli_sanitise_infers_numerical_mode_from_subject_id(

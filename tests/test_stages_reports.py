@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -69,8 +70,47 @@ def test_write_audit_report_records_counts_and_flagged_files(tmp_path: Path) -> 
     assert data["total_files"] == 2
     assert data["duplicate_count"] == 1
     assert data["misfiled_count"] == 0
-    assert data["duplicates"] == ["021-DWI/2.dcm"]
+    assert data["duplicates"] == ["021-DWI"]
     assert data["misfiled"] == []
+    with (reports_dir / "stage-01-audit.csv").open(newline="") as report_file:
+        assert list(csv.DictReader(report_file)) == [
+            {
+                "series_folder": "021-DWI",
+                "dicom_count": "2",
+                "duplicate_count": "1",
+                "misfiled_count": "0",
+                "metadata_inconsistencies": "",
+                "status": "flagged",
+            }
+        ]
+
+
+def test_write_audit_report_flags_metadata_inconsistencies_within_a_series(
+    tmp_path: Path,
+) -> None:
+    capture_dir = tmp_path / "capture"
+    first_file = _metadata(capture_dir / "021-DWI" / "1.dcm")
+    second_file = replace(
+        first_file,
+        path=capture_dir / "021-DWI" / "2.dcm",
+        patient_name="Doe^John^19850101",
+    )
+    audit_result = AuditResult(
+        subject=_subject(capture_dir),
+        files=[
+            AuditedFile(first_file, is_duplicate=False, is_misfiled=False),
+            AuditedFile(second_file, is_duplicate=False, is_misfiled=False),
+        ],
+    )
+
+    report_path = write_audit_report(audit_result, tmp_path / "reports", subject_label="sub-01")
+
+    data = json.loads(report_path.read_text())
+    assert data["metadata_inconsistency_count"] == 1
+    assert data["series"][0]["metadata_inconsistencies"] == "PatientName"
+    with (report_path.parent / "stage-01-audit.csv").open(newline="") as report_file:
+        row = next(iter(csv.DictReader(report_file)))
+    assert row["metadata_inconsistencies"] == "PatientName"
 
 
 def test_write_sift_report_records_retained_and_review_counts(tmp_path: Path) -> None:

@@ -20,7 +20,7 @@ from rich_click.rich_command import RichCommand
 
 from dichotomise.errors import DichotomiseError
 from dichotomise.pipeline import run_pipeline
-from dichotomise.stages.audit import AuditedFile, AuditResult
+from dichotomise.stages.audit import AuditedFile, AuditResult, metadata_inconsistencies
 from dichotomise.utils.console import console, error, success
 
 rich_click_config.OPTION_GROUPS = {
@@ -91,14 +91,7 @@ def _log_stage(status: str, description: str, elapsed_seconds: float) -> None:
 
 def _audit_reasons(files: list[AuditedFile]) -> list[str]:
     """Return the per-folder data-quality and structural findings."""
-    fields: dict[str, set[str | int]] = {
-        "SeriesInstanceUID": {file.metadata.series_instance_uid for file in files},
-        "SeriesNumber": {file.metadata.series_number for file in files},
-        "SeriesDescription": {file.metadata.series_description for file in files},
-        "ProtocolName": {file.metadata.protocol_name for file in files},
-        "StudyDate": {file.metadata.study_date for file in files},
-    }
-    reasons = [f"{name} varies" for name, values in fields.items() if len(values) > 1]
+    reasons = [f"{field} varies" for field in metadata_inconsistencies(files)]
     duplicate_count = sum(file.is_duplicate for file in files)
     misfiled_count = sum(file.is_misfiled for file in files)
     if duplicate_count:
@@ -131,7 +124,7 @@ def _print_audit_table(audit_result: AuditResult) -> None:
     for folder, files in sorted(files_by_folder.items()):
         reasons = _audit_reasons(files)
         table.add_row(
-            str(folder.relative_to(audit_result.subject.directory)),
+            folder.name,
             str(len(files)),
             _latest_modified(files),
             "[green]Pass[/]" if not reasons else "[red]Failed[/]",

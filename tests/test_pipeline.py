@@ -126,7 +126,12 @@ def test_run_pipeline_writes_the_three_numbered_reports(
     assert report_dirs[0].name == "sub-01_20260101-120000_study-001"
 
     reports = {p.name for p in report_dirs[0].iterdir()}
-    assert reports == {"stage-01-report.json", "stage-02-report.json", "stage-03-report.json"}
+    assert reports == {
+        "stage-01-audit.csv",
+        "stage-01-report.json",
+        "stage-02-report.json",
+        "stage-03-report.json",
+    }
 
     finalise_report = json.loads((report_dirs[0] / "stage-03-report.json").read_text())
     assert finalise_report["subject_label"] == "sub-01"
