@@ -19,7 +19,7 @@ regression:
 
 | Export | File naming |
 |---|---|
-| Older Siemens exports | Distinct `.IMA` filenames |
+| Older exports | Distinct `.IMA` filenames |
 | XA30 exports | Distinct `.dcm` filenames |
 | XA60+ exports | `1.dcm`, `2.dcm`, … repeated in every series folder |
 
