@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,8 +29,8 @@ def test_source_archive_names_the_archive_from_run_subject_and_scan_datetime(
 
     archive = source_archive(subject, run)
 
-    expected_stem = "20260101-120000_Doe_Jane_19900101_sub-01_source-archive_20260922T143012Z"
-    assert archive.path == run.source_archive_dir / f"{expected_stem}.tar.gz"
-    assert archive.checksum_path == run.source_archive_dir / f"{expected_stem}.sha256"
+    pattern = r"sub-01_[0-9a-f]{6}_source-archive_20260922T143012Z"
+    assert re.fullmatch(pattern + r"\.tar\.gz", archive.path.name)
+    assert re.fullmatch(pattern + r"\.sha256", archive.checksum_path.name)
     assert archive.path.exists()
     assert verify_archive(archive.path, archive.checksum_path) is True

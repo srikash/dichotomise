@@ -142,8 +142,8 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 ```text
 <run-timestamp>_dichotomise_outputs/
   source/
-    <scan-date>-<scan-time>_<patient-name>_<patient-id>_source-archive_<run-timestamp>.tar.gz
-    <scan-date>-<scan-time>_<patient-name>_<patient-id>_source-archive_<run-timestamp>.sha256
+    <patient-id>_<random-hex>_source-archive_<run-timestamp>.tar.gz
+    <patient-id>_<random-hex>_source-archive_<run-timestamp>.sha256
   archives/
     <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.tar.gz
     <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.sha256
@@ -161,8 +161,8 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 failed or interrupted run. It contains no patient details.
 
 A multi-subject run produces one `source/` archive and one `archives/` archive
-per study. Source archive filenames deliberately retain the original patient
-name and ID for traceability; use the sanitised `archives/` output for sharing.
+per study. Each source archive name uses the original patient ID plus a random
+six-character hexadecimal suffix; use the sanitised `archives/` output for sharing.
 
 Every archive/checksum filename embeds the run timestamp, subject
 identifier, and scan date/time itself, not just its parent folder name, so
