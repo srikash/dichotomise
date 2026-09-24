@@ -61,8 +61,8 @@ problem.
 While motivated by these incidents, `dichotomise` is intended for any DICOM
 export that needs structured audit, sorting, and validation.
 
-`dichotomise` preserves and verifies the original export before processing
-it. It reads DICOM metadata rather than trusting folder names, flags
+`dichotomise` preserves and verifies the original DICOM files before processing
+them. It reads DICOM metadata rather than trusting folder names, flags
 duplicates and cross-series leakage, and writes a verified, clearly named
 working copy.
 
@@ -70,11 +70,11 @@ working copy.
 
 One command runs the full pipeline, in order:
 
-1. **source_archive** — archives the complete, untouched scanner export,
-   including non-DICOM files, with a checksum before any processing.
-2. **capture** — copies readable DICOM files into a working folder, grouping files
+1. **capture** — copies readable DICOM files into a working folder, grouping files
    by `(PatientID, StudyInstanceUID)` from their own headers, never from
    folder names.
+2. **source_archive** — archives each captured study's untouched DICOM files
+   with a checksum before further processing.
 3. **audit** — flags duplicate scan content (by comparing everything except
    each file's own unique ID) and files sitting in the wrong series folder
    (by majority vote of what each folder's own files agree it should
@@ -142,8 +142,8 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 ```text
 <run-timestamp>_dichotomise_outputs/
   source/
-    <run-timestamp>_source-export.tar.gz
-    <run-timestamp>_source-export.sha256
+    <scan-date>-<scan-time>_<patient-name>_<patient-id>_source-archive_<run-timestamp>.tar.gz
+    <scan-date>-<scan-time>_<patient-name>_<patient-id>_source-archive_<run-timestamp>.sha256
   archives/
     <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.tar.gz
     <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.sha256
@@ -151,6 +151,7 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
   reports/
     <subject-label>_<scan-datetime>_study-001/
       stage-01-report.json
+      stage-01-audit.csv
       stage-02-report.json
       stage-03-report.json
   run-status.json             # in_progress, complete, or failed
@@ -159,10 +160,9 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 `run-status.json` lets you distinguish a complete result from one left by a
 failed or interrupted run. It contains no patient details.
 
-A multi-subject run produces one `source/` archive for the complete scanner
-export and one `archives/` archive per subject — each subject's processed
-data can be handed off on its own without extracting anything from a larger
-bundle.
+A multi-subject run produces one `source/` archive and one `archives/` archive
+per study. Source archive filenames deliberately retain the original patient
+name and ID for traceability; use the sanitised `archives/` output for sharing.
 
 Every archive/checksum filename embeds the run timestamp, subject
 identifier, and scan date/time itself, not just its parent folder name, so

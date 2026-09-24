@@ -38,8 +38,15 @@ def test_run_pipeline_produces_one_archive_per_subject_and_cleans_up_working_fil
 
     source_archives = sorted(run.source_archive_dir.glob("*.tar.gz"))
     final_archives = sorted(run.archives_dir.glob("*.tar.gz"))
-    assert len(source_archives) == 1
-    assert source_archives[0].name.endswith("_source-export.tar.gz")
+    assert len(source_archives) == 2
+    assert any(
+        "20260101-120000_Test_Subject_sub-01_source-archive" in path.name
+        for path in source_archives
+    )
+    assert any(
+        "20260102-130000_Test_Subject_sub-02_source-archive" in path.name
+        for path in source_archives
+    )
     assert len(final_archives) == 2
     assert any("sub-01" in p.name for p in final_archives)
     assert any("sub-02" in p.name for p in final_archives)

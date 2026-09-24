@@ -28,7 +28,7 @@ def test_source_archive_names_the_archive_from_run_subject_and_scan_datetime(
 
     archive = source_archive(subject, run)
 
-    expected_stem = "20260922T143012Z_sub-01_20260101-120000_source-archive"
+    expected_stem = "20260101-120000_Doe_Jane_19900101_sub-01_source-archive_20260922T143012Z"
     assert archive.path == run.source_archive_dir / f"{expected_stem}.tar.gz"
     assert archive.checksum_path == run.source_archive_dir / f"{expected_stem}.sha256"
     assert archive.path.exists()

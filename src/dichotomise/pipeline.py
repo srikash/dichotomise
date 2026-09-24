@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable, Mapping
+from functools import partial
 from pathlib import Path
 from time import monotonic
 from typing import TypeVar
@@ -97,6 +98,11 @@ def _reports_dir_for(run: Run, subject: CapturedSubject, subject_label: str) -> 
     )
 
 
+def _archive_source_subject(subject: CapturedSubject, run: Run) -> None:
+    """Archive one captured study before it is audited or transformed."""
+    source_archive(subject, run)
+
+
 def _process_subject(
     subject: CapturedSubject,
     run: Run,
@@ -188,7 +194,6 @@ def run_pipeline(
     """
     run = start_run(out_dir)
     try:
-        _run_stage("Archiving source DICOMs", lambda: source_archive(source_dir, run), on_stage)
         subjects = _run_stage(
             "Capturing DICOMs by study", lambda: capture(source_dir, run), on_stage
         )
@@ -204,6 +209,11 @@ def run_pipeline(
                 )
         used_labels: set[str] = set()
         for subject in subjects:
+            _run_stage(
+                f"Study {subject.output_number}: archiving source DICOMs",
+                partial(_archive_source_subject, subject, run),
+                on_stage,
+            )
             _process_subject(
                 subject,
                 run,
