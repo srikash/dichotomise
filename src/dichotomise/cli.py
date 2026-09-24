@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 from collections import defaultdict
 from collections.abc import Mapping
@@ -12,6 +11,7 @@ from typing import Any
 
 import rich_click as click
 import rich_click.rich_click as rich_click_config
+from rich.console import Group
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
@@ -35,7 +35,7 @@ rich_click_config.OPTION_GROUPS = {
             "options": [
                 "--sanitise",
                 "--sanitise-policy",
-                "--subject-id",
+                "--subj-id",
                 "--new-id",
                 "--random-name",
                 "--mapping",
@@ -51,6 +51,12 @@ rich_click_config.OPTIONS_TABLE_COLUMN_TYPES = ["opt_short", "opt_long", "metava
 rich_click_config.OPTIONS_TABLE_HELP_SECTIONS = ["help", "deprecated", "envvar", "default"]
 rich_click_config.TEXT_MARKUP = "rich"
 
+_EXAMPLE_COMMAND = (
+    "[bold white]dichotomise[/] "
+    "[bold cyan]--source-dir[/] [green]/path/to/scanner_export[/] "
+    "[bold cyan]--out-dir[/] [green]/path/to/fixed_export[/]"
+)
+
 
 class DichotomiseCommand(RichCommand):
     """Render the command's usage notes in the same Rich style as its options."""
@@ -58,15 +64,43 @@ class DichotomiseCommand(RichCommand):
     def format_epilog(self, context: Any, formatter: Any) -> None:
         if self.epilog is None:
             return
-        content = formatter.rich_text(self.epilog, formatter.config.style_epilog_text)
-        panel = Panel(
-            content,
-            title=Text.from_markup("[bold orange1]Usage[/]"),
+        single_subject = Panel(
+            Text.from_markup(
+                f"[bold cyan]Numerical:[/] {_EXAMPLE_COMMAND} "
+                "[bold cyan]--sanitise[/] [bold cyan]--subj-id[/] [magenta]6[/]\n"
+                "           Creates [green]sub-0006[/].\n\n"
+                f"[bold cyan]Random:[/] {_EXAMPLE_COMMAND} [bold cyan]--random-name[/]\n\n"
+                f"[bold cyan]Exact:[/] {_EXAMPLE_COMMAND} "
+                "[bold cyan]--sanitise[/] [bold cyan]--new-id[/] [magenta]ADNC0751[/]\n"
+                "       Creates [green]sub-ADNC0751[/]."
+            ),
+            title=Text.from_markup("[bold yellow]Single-Subject mode[/]"),
             title_align="left",
-            border_style="orange1",
+            border_style="yellow",
             padding=(0, 1),
         )
-        formatter.write(Padding(panel, formatter.config.padding_epilog))
+        multi_subject = Panel(
+            Text.from_markup(
+                f"[bold cyan]Numerical:[/] {_EXAMPLE_COMMAND} "
+                "[bold cyan]--sanitise[/] [bold cyan]--subj-id[/] [magenta]6[/]\n"
+                "           Creates [green]sub-0006[/], [green]sub-0007[/], [green]sub-0008[/], …\n"
+                "           [yellow]Warning:[/] enumeration is enabled automatically.\n\n"
+                f"[bold cyan]Random:[/] {_EXAMPLE_COMMAND} [bold cyan]--random-name[/]\n\n"
+                f"[bold cyan]Mapped:[/] {_EXAMPLE_COMMAND} "
+                "[bold cyan]--sanitise[/] [bold cyan]--mapping-file[/] "
+                "[green]/path/to/mapping_file.json[/]"
+            ),
+            title=Text.from_markup("[bold yellow]Multi-Subject mode[/]"),
+            title_align="left",
+            border_style="yellow",
+            padding=(0, 1),
+        )
+        content = Group(
+            Text.from_markup("[bold orange1]Usage Guide:[/]"),
+            Padding(single_subject, (1, 0, 0, 0)),
+            Padding(multi_subject, (1, 0, 0, 0)),
+        )
+        formatter.write(Padding(content, formatter.config.padding_epilog))
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -87,6 +121,12 @@ def _log_stage(status: str, description: str, elapsed_seconds: float) -> None:
     else:
         message = f"Failed: {description} after {_format_elapsed(elapsed_seconds)}"
     console.print(f"[dim]{timestamp}[/] {message}")
+
+
+def _log_warning(message: str) -> None:
+    """Render a timestamped warning alongside verbose pipeline progress."""
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    console.print(f"[dim]{timestamp}[/] [yellow]Warning:[/] {message}")
 
 
 def _audit_reasons(files: list[AuditedFile]) -> list[str]:
@@ -190,51 +230,47 @@ def _parse_inline_mappings(entries: tuple[str, ...]) -> dict[str, str]:
         for pair in entry.split(","):
             source_id, separator, replacement_id = pair.partition(":")
             if not separator:
-                raise click.UsageError("Each --mapping value must be written as current_id:new_id.")
+                raise click.UsageError(
+                    "Each --mapping value must be written as patient_id:replacement_id."
+                )
             _add_mapping(mapping, source_id, replacement_id)
     return mapping
 
 
 def _load_mapping_file(path: Path) -> dict[str, str]:
-    if path.suffix.lower() == ".json":
-        try:
-            contents = json.loads(path.read_text())
-        except json.JSONDecodeError as error:
-            raise click.UsageError(f"{path} is not valid JSON.") from error
-        if not isinstance(contents, Mapping):
-            raise click.UsageError(
-                "A JSON mapping file must be an object of source IDs to new IDs."
-            )
-        loaded_mapping: dict[str, str] = {}
-        for source_id, replacement_id in contents.items():
-            if not isinstance(source_id, str) or not isinstance(replacement_id, str):
-                raise click.UsageError("A JSON mapping file must contain string IDs only.")
-            _add_mapping(loaded_mapping, source_id, replacement_id)
-        return loaded_mapping
-    if path.suffix.lower() != ".csv":
-        raise click.UsageError("A mapping file must be CSV or JSON.")
-    with path.open(newline="") as mapping_file:
-        rows = csv.DictReader(mapping_file)
-        if rows.fieldnames != ["source_id", "new_id"]:
-            raise click.UsageError("A CSV mapping file needs source_id,new_id column headings.")
-        loaded_mapping = {}
-        for row in rows:
-            _add_mapping(loaded_mapping, row.get("source_id", ""), row.get("new_id", ""))
+    resolved_path = path if path.is_file() else path.with_suffix(".json")
+    if not resolved_path.is_file():
+        raise click.UsageError(f"No JSON mapping file found at {path} or {resolved_path}.")
+    try:
+        contents = json.loads(resolved_path.read_text())
+    except json.JSONDecodeError as error:
+        raise click.UsageError(f"{resolved_path} is not valid JSON.") from error
+    if not isinstance(contents, Mapping):
+        raise click.UsageError(
+            "A JSON mapping file must be an object of PatientID to replacement ID."
+        )
+    loaded_mapping: dict[str, str] = {}
+    for source_id, replacement_id in contents.items():
+        if not isinstance(source_id, str) or not isinstance(replacement_id, str):
+            raise click.UsageError("A JSON mapping file must contain string IDs only.")
+        _add_mapping(loaded_mapping, source_id, replacement_id)
     return loaded_mapping
 
 
 @click.command(
     cls=DichotomiseCommand,
     help=(
-        "Copy, audit, sift, rectify, and archive a DICOM study. "
-        "Use --sanitise to also replace patient identity before final archiving."
+        "A command-line tool for auditing, fixing, and archiving DICOM exports from Siemens "
+        "XA60+ systems."
     ),
     epilog=(
-        "[bold]Basic run[/]: dichotomise --source-dir RAW_DICOMS --out-dir OUTPUTS\n\n"
-        "[bold]Relabelled run[/]: dichotomise --source-dir RAW_DICOMS --out-dir OUTPUTS "
-        "--sanitise --subject-id 1\n\n"
-        "The audit table is shown before rectification. Failed rows are copied to review/ "
-        "rather than silently discarded."
+        "[bold]Basic run[/]: dichotomise --source-dir /path/to/scanner_export "
+        "--out-dir /path/to/fixed_export\n\n"
+        "[bold]Relabelled run[/]: dichotomise --source-dir /path/to/scanner_export "
+        "--out-dir /path/to/fixed_export "
+        "--sanitise --subj-id 1\n\n"
+        "The audit table is shown before fixing and classification. Failed series are copied to "
+        "review/ rather than be quietly discarded."
     ),
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -244,39 +280,43 @@ def _load_mapping_file(path: Path) -> dict[str, str]:
     type=click.Path(path_type=Path, exists=True, file_okay=False),
     required=True,
     panel="Required flags",
-    help="Raw DICOM directory to process.",
+    help="Input directory to be processed. Can be single- or multi-subject directory.",
 )
 @click.option(
     "--out-dir",
     type=click.Path(path_type=Path, file_okay=False),
     required=True,
     panel="Required flags",
-    help="Parent directory for the timestamped dichotomise output folder.",
+    help="Output directory for dichotomised results.",
 )
 @click.option(
     "--sanitise",
     is_flag=True,
     panel="Optional flags",
-    help="Replace patient identity before final archiving.",
+    help="Do some anonymisation before final archiving.",
 )
 @click.option(
     "--sanitise-policy",
-    "--sanitise-level",
     "sanitise_policy",
     default=None,
     panel="Optional flags",
     help=(
-        "JSON policy filename without .json: minimal (default), standard, full, retain, or custom."
+        "Use JSON policy presets: minimal (default), standard, full, retain.\n\n"
+        "Custom policy names may be given with or without .json."
     ),
 )
 @click.option(
-    "--subject-id", default=None, panel="Optional flags", help="Starting numerical subject ID."
+    "--subj-id",
+    "subject_id",
+    default=None,
+    panel="Optional flags",
+    help="Numerical replacement ID; 6 produces sub-0006.",
 )
 @click.option(
     "--new-id",
     default=None,
     panel="Optional flags",
-    help="Exact replacement ID for one subject only.",
+    help="Replacement ID for one study; ADNC0751 becomes sub-ADNC0751.",
 )
 @click.option(
     "--random-name",
@@ -285,14 +325,17 @@ def _load_mapping_file(path: Path) -> dict[str, str]:
     help="Generate a random replacement name using the minimal sanitisation policy.",
 )
 @click.option(
-    "--mapping", multiple=True, panel="Optional flags", help="One or more current_id:new_id pairs."
+    "--mapping",
+    multiple=True,
+    panel="Optional flags",
+    help="PatientID:replacement_id pair; repeat the flag or separate pairs with commas.",
 )
 @click.option(
     "--mapping-file",
-    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    type=click.Path(path_type=Path, dir_okay=False),
     default=None,
     panel="Optional flags",
-    help="CSV or JSON file mapping source IDs to replacement IDs.",
+    help="JSON file mapping PatientID to replacement ID; .json may be omitted.",
 )
 @click.option(
     "--keep-working-files",
@@ -321,11 +364,10 @@ def cli(
     )
     if label_sources > 1:
         raise click.UsageError(
-            "Choose only one of --subject-id, --new-id, --mapping, or --mapping-file."
+            "Choose only one of --subj-id, --new-id, --mapping, or --mapping-file."
         )
     if not sanitise and label_sources:
         raise click.UsageError("Replacement-label options require --sanitise or --sanitise-policy.")
-
     effective_sanitise_policy = sanitise_policy or "minimal"
     subject_mappings = _parse_inline_mappings(mapping) if mapping else None
     if mapping_file is not None:
@@ -352,6 +394,7 @@ def cli(
             keep_working_files=keep_working_files,
             on_audit=_print_audit_table,
             on_stage=_log_stage,
+            on_warning=_log_warning,
         )
     except DichotomiseError as failure:
         error(str(failure))

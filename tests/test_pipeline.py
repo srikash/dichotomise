@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
@@ -124,7 +125,7 @@ def test_run_pipeline_writes_the_three_numbered_reports(
 
     report_dirs = list(run.reports_dir.iterdir())
     assert len(report_dirs) == 1
-    assert report_dirs[0].name == "sub-01_20260101-120000_study-001"
+    assert re.fullmatch(r"sub-01_[0-9a-f]{6}", report_dirs[0].name)
 
     reports = {p.name for p in report_dirs[0].iterdir()}
     assert reports == {
@@ -160,7 +161,7 @@ def test_run_pipeline_reports_use_the_replacement_label_when_sanitised(
     )
 
     report_dirs = list(run.reports_dir.iterdir())
-    assert report_dirs[0].name == "sub-0007_20260101-120000_study-001"
+    assert re.fullmatch(r"sub-0007_[0-9a-f]{6}", report_dirs[0].name)
 
 
 def test_run_pipeline_sanitised_reports_never_contain_the_real_patient_id(

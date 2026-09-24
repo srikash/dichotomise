@@ -87,6 +87,12 @@ def test_load_policy_custom_overrides_its_base_and_adds_new_fields() -> None:
     assert policy.actions["AccessionNumber"]["action"] == "remove"  # custom's own addition
 
 
+def test_load_policy_accepts_a_json_filename() -> None:
+    policy = load_policy("standard.json")
+
+    assert policy.name == "standard"
+
+
 def test_load_policy_raises_a_plain_error_for_an_unknown_policy_name() -> None:
     with pytest.raises(PolicyNotFoundError):
         load_policy("does-not-exist")

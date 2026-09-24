@@ -118,6 +118,7 @@ def load_policy(name: str) -> Policy:
     "standard" does, with "full"'s own entries taking priority where the two
     disagree.
     """
+    name = name.removesuffix(".json")
     if name == "default":
         return Policy(name="default", actions={})
     return _load_policy(name, ancestors=frozenset())

@@ -6,6 +6,7 @@ import shutil
 from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
+from secrets import token_hex
 from time import monotonic
 from typing import TypeVar
 
@@ -29,6 +30,7 @@ from dichotomise.utils.text import safe_filename_text
 
 _T = TypeVar("_T")
 StageCallback = Callable[[str, str, float], None]
+WarningCallback = Callable[[str], None]
 
 
 def _run_stage(description: str, operation: Callable[[], _T], on_stage: StageCallback | None) -> _T:
@@ -82,20 +84,26 @@ def _resolve_subject_label(
     if label_mode == "custom":
         if not new_id:
             raise RelabelError("Custom replacement labels need a replacement ID")
-        return validate_label(new_id)
+        label = validate_label(new_id)
+        return label if label.startswith("sub-") else f"sub-{label}"
     if label_mode == "random":
         return _random_subject_label(used_labels)
     raise RelabelError(f"Unsupported replacement-label mode: {label_mode}")
 
 
-def _reports_dir_for(run: Run, subject: CapturedSubject, subject_label: str) -> Path:
+def _random_output_token(used_tokens: set[str]) -> str:
+    """Return a unique six-character hexadecimal token for one study output."""
+    while len(used_tokens) < 16_777_216:
+        token = token_hex(3)
+        if token not in used_tokens:
+            used_tokens.add(token)
+            return token
+    raise RelabelError("Could not create a unique output token for every study")
+
+
+def _reports_dir_for(run: Run, subject_label: str, output_token: str) -> Path:
     """Return this study's collision-safe directory under reports/."""
-    scan_datetime = (
-        f"{safe_filename_text(subject.scan_date)}-{safe_filename_text(subject.scan_time)}"
-    )
-    return run.reports_dir / (
-        f"{safe_filename_text(subject_label)}_{scan_datetime}_study-{subject.output_number:03d}"
-    )
+    return run.reports_dir / f"{safe_filename_text(subject_label)}_{output_token}"
 
 
 def _archive_source_subject(subject: CapturedSubject, run: Run) -> None:
@@ -114,6 +122,7 @@ def _process_subject(
     new_id: str | None,
     subject_mappings: Mapping[str, str] | None,
     used_labels: set[str],
+    used_output_tokens: set[str],
     on_audit: Callable[[AuditResult], None] | None,
     on_stage: StageCallback | None,
 ) -> None:
@@ -126,7 +135,8 @@ def _process_subject(
         subject_label = _resolve_subject_label(
             subject, label_mode, subject_id, new_id, subject_mappings, used_labels
         )
-    reports_dir = _reports_dir_for(run, subject, subject_label)
+    output_token = _random_output_token(used_output_tokens)
+    reports_dir = _reports_dir_for(run, subject_label, output_token)
 
     subject_prefix = f"Study {subject.output_number}"
     audit_result = _run_stage(f"{subject_prefix}: auditing", lambda: audit(subject), on_stage)
@@ -155,7 +165,11 @@ def _process_subject(
     finalise_result = _run_stage(
         f"{subject_prefix}: creating verified archive",
         lambda: finalise(
-            rectify_result, run, subject_label=subject_label, sanitise_result=sanitise_result
+            rectify_result,
+            run,
+            subject_label=subject_label,
+            sanitise_result=sanitise_result,
+            archive_token=output_token,
         ),
         on_stage,
     )
@@ -185,6 +199,7 @@ def run_pipeline(
     keep_working_files: bool = False,
     on_audit: Callable[[AuditResult], None] | None = None,
     on_stage: StageCallback | None = None,
+    on_warning: WarningCallback | None = None,
 ) -> Run:
     """Run the full dichotomise pipeline over every subject found under `source_dir`.
 
@@ -199,6 +214,10 @@ def run_pipeline(
         )
         if new_id is not None and len(subjects) != 1:
             raise RelabelError("--new-id may only be used when the source contains one subject.")
+        if subject_id is not None and len(subjects) != 1 and on_warning is not None:
+            on_warning(
+                "Multiple studies found with --subj-id; numbering replacement IDs sequentially."
+            )
         if subject_mappings is not None:
             source_ids = {subject.subject_id for subject in subjects}
             unknown_ids = set(subject_mappings) - source_ids
@@ -208,6 +227,7 @@ def run_pipeline(
                     + ", ".join(sorted(unknown_ids))
                 )
         used_labels: set[str] = set()
+        used_output_tokens: set[str] = set()
         for subject in subjects:
             _run_stage(
                 f"Study {subject.output_number}: archiving source DICOMs",
@@ -224,6 +244,7 @@ def run_pipeline(
                 new_id=new_id,
                 subject_mappings=subject_mappings,
                 used_labels=used_labels,
+                used_output_tokens=used_output_tokens,
                 on_audit=on_audit,
                 on_stage=on_stage,
             )

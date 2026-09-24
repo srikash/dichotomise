@@ -164,12 +164,20 @@ folder names do not need to be sensible.
 | `--source-dir` (required) | Raw DICOM directory to process. |
 | `--out-dir` (required) | Parent directory for the timestamped output folder. |
 | `--sanitise` | Replace patient identity before final archiving. This uses `minimal` unless a policy is chosen. |
-| `--sanitise-policy` / `--sanitise-level` | JSON policy filename without `.json`: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Implies `--sanitise`. |
-| `--subject-id` | Starting numerical subject ID. Multi-subject runs increment it for each subject. |
-| `--new-id` | Exact replacement ID for one subject. |
-| `--mapping` | One or more inline `current_id:new_id` pairs; comma-separated pairs are accepted. |
-| `--mapping-file` | CSV (`source_id,new_id`) or JSON (`{"source_id": "new_id"}`) mappings for several subjects. |
+| `--sanitise-policy` | JSON policy name: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Both `custom` and `custom.json` are accepted. Implies `--sanitise`. |
+| `--subj-id` | First numerical replacement ID. For one study, `6` produces `sub-0006`. With several studies, IDs are enumerated automatically as `sub-0006`, `sub-0007`, `sub-0008`, and so on; the CLI logs a warning. |
+| `--new-id` | Replacement ID for one study. `ADNC0751` becomes `sub-ADNC0751`; an existing `sub-` prefix is retained. |
+| `--mapping` | One or more `PatientID:replacement_id` pairs. Repeat the flag or separate pairs with commas. The PatientID must exactly match the DICOM `PatientID`. |
+| `--mapping-file` | JSON object mapping DICOM PatientID to replacement ID, for example `{"source-01": "sub-0001"}`. A full path may be given with or without the `.json` suffix. |
 | `--keep-working-files` | Keep the copied and processed DICOM files (`working/`) instead of deleting them once the archives are verified. |
+
+For one study, use `--subj-id`, `--random-name`, or `--new-id`. For several
+studies, use `--subj-id` (automatic enumeration), `--random-name`, `--mapping`,
+or `--mapping-file`; `--new-id` remains intentionally limited to one study.
+
+[`docs/example-mapping.json`](docs/example-mapping.json) is a ready-to-copy
+mapping-file example. Its keys must match the source DICOM `PatientID` values;
+its values are the exact replacement labels to write.
 
 ## Output structure
 
@@ -181,11 +189,11 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
     <patient-id>_<6char-hex>_source-archive_<run-timestamp>.tar.gz
     <patient-id>_<6char-hex>_source-archive_<run-timestamp>.sha256
   archives/
-    <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.tar.gz
-    <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.sha256
+    <subject-label>_<6char-hex>_dichotomised-archive_<run-timestamp>.tar.gz
+    <subject-label>_<6char-hex>_dichotomised-archive_<run-timestamp>.sha256
   working/                   # temporary, removed unless --keep-working-files
   reports/
-    <subject-label>_<scan-datetime>_study-001/
+    <subject-label>_<6char-hex>/
       stage-01-report.json
       stage-01-audit.csv
       stage-02-report.json
@@ -202,12 +210,11 @@ six-character hexadecimal suffix. The source archive contains untouched DICOM
 files and their original headers, including patient identity; use the
 sanitised `archives/` output for sharing.
 
-Processed archive and report names include `<scan-datetime>`, taken directly
-from DICOM `StudyDate`/`StudyTime` (the scanner's local time, not converted to
-the run timestamp's UTC). `archives/` and `reports/` use `<subject-label>`:
-the real `PatientID`, unless `--sanitise` was used, in which case it is the
-replacement label. A sanitised archive's filename and DICOM headers therefore
-do not expose the original identifier.
+Processed archive and report names use the study's `<subject-label>` plus a
+random six-character hexadecimal suffix. `<subject-label>` is the real
+`PatientID`, unless `--sanitise` was used, in which case it is the replacement
+label. A sanitised archive's filename and DICOM headers therefore do not
+expose the original identifier.
 
 ### Reports
 

@@ -90,6 +90,7 @@ def finalise(
     *,
     subject_label: str,
     sanitise_result: SanitiseResult | None = None,
+    archive_token: str | None = None,
 ) -> FinaliseResult:
     """Verify the finished output tree, then archive it into `run.archives_dir`.
 
@@ -107,10 +108,16 @@ def finalise(
     scan_datetime = (
         f"{safe_filename_text(subject.scan_date)}-{safe_filename_text(subject.scan_time)}"
     )
-    name = (
-        f"{run.timestamp}_{safe_filename_text(subject_label)}_{scan_datetime}"
-        f"_study-{subject.output_number:03d}_dichotomised-archive.tar.gz"
-    )
+    if archive_token is None:
+        name = (
+            f"{run.timestamp}_{safe_filename_text(subject_label)}_{scan_datetime}"
+            f"_study-{subject.output_number:03d}_dichotomised-archive.tar.gz"
+        )
+    else:
+        name = (
+            f"{safe_filename_text(subject_label)}_{safe_filename_text(archive_token)}"
+            f"_dichotomised-archive_{run.timestamp}.tar.gz"
+        )
     archive_path = run.archives_dir / name
     archive = make_tarball(source_dir, archive_path)
 

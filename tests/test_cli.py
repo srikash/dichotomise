@@ -37,8 +37,13 @@ def test_cli_help_groups_required_and_optional_flags() -> None:
     assert "Required flags" in result.output
     assert "Optional flags" in result.output
     assert "Usage" in result.output
-    assert "Basic run" in result.output
+    assert "Single-Subject mode" in result.output
+    assert "Multi-Subject mode" in result.output
     assert "[required]" not in result.output
+    assert "--sanitise-policy" in result.output
+    assert "--sanitise-level" not in result.output
+    assert "--subj-id" in result.output
+    assert "--subject-id" not in result.output
 
 
 def test_cli_audit_table_reports_metadata_and_structural_findings(
@@ -84,7 +89,7 @@ def test_cli_sanitise_infers_numerical_mode_from_subject_id(
             "--out-dir",
             str(out_dir),
             "--sanitise",
-            "--subject-id",
+            "--subj-id",
             "5",
         ],
     )
@@ -94,7 +99,86 @@ def test_cli_sanitise_infers_numerical_mode_from_subject_id(
     assert "sub-0005" in archives[0].name
 
 
-def test_cli_accepts_a_custom_sanitise_level(
+def test_cli_new_id_adds_the_sub_prefix(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="scanner-42", StudyInstanceUID="study-a")
+    out_dir = tmp_path / "out"
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--source-dir",
+            str(source),
+            "--out-dir",
+            str(out_dir),
+            "--sanitise",
+            "--new-id",
+            "ADNC0751",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    assert archives[0].name.startswith("sub-ADNC0751_")
+
+
+def test_cli_automatically_enumerates_a_numerical_multi_study_run(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "one" / "1.dcm", PatientID="source-01", StudyInstanceUID="study-a")
+    make_dicom_file(source / "two" / "1.dcm", PatientID="source-02", StudyInstanceUID="study-b")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--source-dir",
+            str(source),
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--sanitise",
+            "--subj-id",
+            "6",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Warning: Multiple studies found with --subj-id" in result.output
+    archives = list((tmp_path / "out").glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    assert any(archive.name.startswith("sub-0006_") for archive in archives)
+    assert any(archive.name.startswith("sub-0007_") for archive in archives)
+
+
+def test_cli_loads_a_json_mapping_file_when_its_extension_is_omitted(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="scanner-42", StudyInstanceUID="study-a")
+    mapping_path = tmp_path / "labels.json"
+    mapping_path.write_text('{"scanner-42": "sub-0042"}')
+    out_dir = tmp_path / "out"
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--source-dir",
+            str(source),
+            "--out-dir",
+            str(out_dir),
+            "--sanitise",
+            "--mapping-file",
+            str(mapping_path.with_suffix("")),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    assert archives[0].name.startswith("sub-0042_")
+
+
+def test_cli_accepts_a_custom_sanitise_policy(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
@@ -114,17 +198,17 @@ def test_cli_accepts_a_custom_sanitise_level(
             "--out-dir",
             str(out_dir),
             "--sanitise",
-            "--subject-id",
+            "--subj-id",
             "1",
-            "--sanitise-level",
-            "custom",
+            "--sanitise-policy",
+            "custom.json",
         ],
     )
 
     assert result.exit_code == 0, result.output
 
 
-def test_cli_reports_a_plain_error_for_an_unknown_sanitise_level(
+def test_cli_reports_a_plain_error_for_an_unknown_sanitise_policy(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
@@ -139,9 +223,9 @@ def test_cli_reports_a_plain_error_for_an_unknown_sanitise_level(
             "--out-dir",
             str(out_dir),
             "--sanitise",
-            "--subject-id",
+            "--subj-id",
             "1",
-            "--sanitise-level",
+            "--sanitise-policy",
             "does-not-exist",
         ],
     )
@@ -160,7 +244,7 @@ def test_cli_rejects_sanitise_options_without_the_sanitise_flag(
 
     result = CliRunner().invoke(
         cli,
-        ["--source-dir", str(source), "--out-dir", str(out_dir), "--subject-id", "5"],
+        ["--source-dir", str(source), "--out-dir", str(out_dir), "--subj-id", "5"],
     )
 
     assert result.exit_code != 0
@@ -203,7 +287,7 @@ def test_cli_random_name_implies_sanitise_with_the_minimal_policy(
     assert "sub-01" not in archives[0].name
 
 
-def test_cli_random_name_conflicting_with_sanitise_level_is_an_error(
+def test_cli_random_name_conflicting_with_sanitise_policy_is_an_error(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
@@ -218,7 +302,7 @@ def test_cli_random_name_conflicting_with_sanitise_level_is_an_error(
             "--out-dir",
             str(out_dir),
             "--random-name",
-            "--sanitise-level",
+            "--sanitise-policy",
             "full",
         ],
     )
