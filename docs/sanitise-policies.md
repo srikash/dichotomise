@@ -130,7 +130,7 @@ invented names.
 
 To make your own: copy `custom.json` to `<your-policy-name>.json` in
 `src/dichotomise/pydcm/policies/`, change its `name` field to match, edit
-`actions`, and run with `--sanitise-level <your-policy-name>`. Any file
+`actions`, and run with `--sanitise-policy <your-policy-name>`. Any file
 saved there under that naming pattern is loadable this way — `cli.py` does
 not hardcode a list of allowed levels, and an unrecognised name produces a
 plain error naming what's available rather than a Python traceback.

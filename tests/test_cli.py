@@ -157,7 +157,9 @@ def test_cli_loads_a_json_mapping_file_when_its_extension_is_omitted(
     source = tmp_path / "export"
     make_dicom_file(source / "series" / "1.dcm", PatientID="scanner-42", StudyInstanceUID="study-a")
     mapping_path = tmp_path / "labels.json"
-    mapping_path.write_text('{"scanner-42": "sub-0042"}')
+    mapping_path.write_text(
+        '{"instructions": ["This entry is ignored."], "scanner-42": "sub-0042"}'
+    )
     out_dir = tmp_path / "out"
 
     result = CliRunner().invoke(

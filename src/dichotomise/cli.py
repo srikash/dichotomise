@@ -251,6 +251,14 @@ def _load_mapping_file(path: Path) -> dict[str, str]:
         )
     loaded_mapping: dict[str, str] = {}
     for source_id, replacement_id in contents.items():
+        if source_id == "instructions":
+            if not isinstance(replacement_id, list) or not all(
+                isinstance(instruction, str) for instruction in replacement_id
+            ):
+                raise click.UsageError(
+                    'The optional "instructions" entry must be a list of strings.'
+                )
+            continue
         if not isinstance(source_id, str) or not isinstance(replacement_id, str):
             raise click.UsageError("A JSON mapping file must contain string IDs only.")
         _add_mapping(loaded_mapping, source_id, replacement_id)

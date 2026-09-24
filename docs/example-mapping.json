@@ -1,4 +1,12 @@
 {
+  "instructions": [
+    "Use this file directly with --mapping-file after replacing the example entries.",
+    "The instructions field is ignored by dichotomise.",
+    "Every other key must exactly match a source DICOM PatientID.",
+    "Each value is the replacement ID. Include sub- yourself if that is wanted.",
+    "Add one PatientID: replacement-ID entry for every participant, then remove",
+    "the example entries that do not apply to this export."
+  ],
   "scanner-patient-001": "sub-ADNC0751",
   "scanner-patient-002": "sub-ADNC0752"
 }

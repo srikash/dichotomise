@@ -63,14 +63,14 @@ applicable entities identify the data within the filename itself.
    [Example Incident 1](#incident-1-dicom-placed-in-the-wrong-series) shows that this
    disagreement occurred in a single export with no user intervention.
 
-4. **Make collisions visible before they cost data.** When exports are
+3. **Make collisions visible before they cost data.** When exports are
    combined, flattened or restored into one directory, repeated names
    collide. Depending on the operation and its settings, a collision can
    overwrite a file or stop the transfer. Either way, the filename cannot
    distinguish the DICOMs involved. Safe reuse demands an explicit identity
    check, not trust in the exported names.
 
-5. **Preserve the evidence needed to audit and reuse data.** Matching
+4. **Preserve the evidence needed to audit and reuse data.** Matching
    filenames do not establish that two DICOMs contain the same instance or
    the same scan content. Counters alone cannot verify completeness, detect a
    misplaced instance or establish where a file came from. FAIR **R1.2**
@@ -86,7 +86,7 @@ applicable entities identify the data within the filename itself.
 We noticed inconsistencies in scanner exports and inspected the DICOM metadata
 manually. Both incidents below were present before anyone copied, moved or
 processed the files. They are examples of the intermittent, inconsistent
-errors we have encountered, not an exhaustive list. Happens with product sequences 
+errors we have encountered, not an exhaustive list. These occur in product sequences
 and C2Ps alike.
 
 #### Incident 1: DICOM placed in the wrong series
@@ -147,20 +147,37 @@ expert/stage-by-stage command.
 
 ## Installation
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+`dichotomise` requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
-From a new clone, create the project's virtual environment and install the
-locked dependencies:
+If you already have Python and `pip`:
 
 ```bash
-uv venv
-uv sync
+python -m pip install --user uv
 ```
 
-This creates `.venv/` in the project directory. Run the command through that
-environment:
+Otherwise, install uv directly:
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Install from PyPI (after release)
+
+```bash
+uv tool install --python 3.11 dichotomise
+dichotomise --help
+```
+
+This creates an isolated environment for `dichotomise`. If Python 3.11 is not
+available, uv downloads it automatically.
+
+### Install from a source checkout
+
+```bash
+git clone https://github.com/srikash/dichotomise.git
+cd dichotomise
+uv venv --python 3.11
+uv sync --locked
 uv run dichotomise --help
 ```
 
@@ -182,6 +199,7 @@ folder names do not need to be sensible.
 | `--sanitise-policy` | JSON policy name: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Both `custom` and `custom.json` are accepted. Implies `--sanitise`. |
 | `--subj-id` | First numerical replacement ID. For one study, `6` produces `sub-0006`. With several studies, IDs are enumerated automatically as `sub-0006`, `sub-0007`, `sub-0008`, and so on; the CLI logs a warning. |
 | `--new-id` | Replacement ID for one study. `ADNC0751` becomes `sub-ADNC0751`; an existing `sub-` prefix is retained. |
+| `--random-name` | Generate a random replacement name using the `minimal` sanitisation policy. |
 | `--mapping` | One or more `PatientID:replacement_id` pairs. Repeat the flag or separate pairs with commas. The PatientID must exactly match the DICOM `PatientID`. |
 | `--mapping-file` | JSON object mapping DICOM PatientID to replacement ID, for example `{"source-01": "sub-0001"}`. A full path may be given with or without the `.json` suffix. |
 | `--keep-working-files` | Keep the copied and processed DICOM files (`working/`) instead of deleting them once the archives are verified. |
@@ -192,7 +210,8 @@ or `--mapping-file`; `--new-id` remains intentionally limited to one study.
 
 [`docs/example-mapping.json`](docs/example-mapping.json) is a ready-to-copy
 mapping-file example. Its keys must match the source DICOM `PatientID` values;
-its values are the exact replacement labels to write.
+its values are the exact replacement labels to write. Its `instructions` field
+is ignored by the CLI.
 
 ## Output structure
 
