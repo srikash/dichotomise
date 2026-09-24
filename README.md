@@ -63,8 +63,8 @@ export that needs structured audit, sorting, and validation.
 
 `dichotomise` preserves and verifies the original DICOM files before processing
 them. It reads DICOM metadata rather than trusting folder names, flags
-duplicates and cross-series leakage, and writes a verified, clearly named
-working copy.
+duplicate content, misplaced DICOMs, and inconsistent identity or series
+metadata. It then writes verified, clearly named output.
 
 ## What it does
 
@@ -76,13 +76,14 @@ One command runs the full pipeline, in order:
 2. **source_archive** — archives each captured study's untouched DICOM files
    with a checksum before further processing.
 3. **audit** — flags duplicate scan content (by comparing everything except
-   each file's own unique ID) and files sitting in the wrong series folder
-   (by majority vote of what each folder's own files agree it should
-   contain).
+   each file's own unique ID), files sitting in the wrong series folder, and
+   inconsistent patient, study, or series metadata within a physical DICOM
+   folder. The CLI prints a Rich inventory table, and the reports include a
+   spreadsheet-friendly CSV.
 4. **sift** — splits files into `retained` and `review`, physically, so a
    flagged file is never silently included.
 5. **rectify** — copies retained files into a sorted, clearly named tree:
-   `<series number>-<protocol name>/<series>_<series ID>_<instance>_e<echo>.dcm`.
+   `<series number>-<series description>/<series>_<series ID>_<instance>_e<echo>.dcm`.
 6. **sanitise** *(optional, `--sanitise`)* — replaces patient identity
    according to a chosen policy; see [Sanitisation](#sanitisation) below.
 7. **finalise** — independently re-reads the finished output tree (not a
@@ -128,7 +129,7 @@ folder names do not need to be sensible.
 | `--source-dir` (required) | Raw DICOM directory to process. |
 | `--out-dir` (required) | Parent directory for the timestamped output folder. |
 | `--sanitise` | Replace patient identity before final archiving. This uses `minimal` unless a policy is chosen. |
-| `--sanitise-policy` | JSON policy filename without `.json`: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Implies `--sanitise`. |
+| `--sanitise-policy` / `--sanitise-level` | JSON policy filename without `.json`: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Implies `--sanitise`. |
 | `--subject-id` | Starting numerical subject ID. Multi-subject runs increment it for each subject. |
 | `--new-id` | Exact replacement ID for one subject. |
 | `--mapping` | One or more inline `current_id:new_id` pairs; comma-separated pairs are accepted. |
@@ -142,8 +143,8 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 ```text
 <run-timestamp>_dichotomise_outputs/
   source/
-    <patient-id>_<random-hex>_source-archive_<run-timestamp>.tar.gz
-    <patient-id>_<random-hex>_source-archive_<run-timestamp>.sha256
+    <patient-id>_<6char-hex>_source-archive_<run-timestamp>.tar.gz
+    <patient-id>_<6char-hex>_source-archive_<run-timestamp>.sha256
   archives/
     <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.tar.gz
     <run-timestamp>_<subject-label>_<scan-datetime>_study-001_dichotomised-archive.sha256
@@ -162,21 +163,31 @@ failed or interrupted run. It contains no patient details.
 
 A multi-subject run produces one `source/` archive and one `archives/` archive
 per study. Each source archive name uses the original patient ID plus a random
-six-character hexadecimal suffix; use the sanitised `archives/` output for sharing.
+six-character hexadecimal suffix. The source archive contains untouched DICOM
+files and their original headers, including patient identity; use the
+sanitised `archives/` output for sharing.
 
-Every archive/checksum filename embeds the run timestamp, subject
-identifier, and scan date/time itself, not just its parent folder name, so
-identity and provenance survive the file being copied out of its run
-folder. `<scan-datetime>` comes from the DICOM `StudyDate`/`StudyTime`
-fields, used as scanned (the scanner's own local time, not converted to
-match the run timestamp's UTC).
+Processed archive and report names include `<scan-datetime>`, taken directly
+from DICOM `StudyDate`/`StudyTime` (the scanner's local time, not converted to
+the run timestamp's UTC). `archives/` and `reports/` use `<subject-label>`:
+the real `PatientID`, unless `--sanitise` was used, in which case it is the
+replacement label. A sanitised archive's filename and DICOM headers therefore
+do not expose the original identifier.
 
-`source/` does not use a patient identifier in its filename: it contains the
-complete, untouched scanner export, sanitised or not. `archives/` and `reports/` use
-`<subject-label>`: the real `PatientID`, unless `--sanitise` was used, in
-which case it is the replacement label instead — a sanitised archive's
-*filename* never leaks the real identifier, matching what's inside the
-DICOM headers.
+### Reports
+
+Each study has a directory under `reports/` containing:
+
+- `stage-01-report.json` — audit totals, duplicate and misfiled folders, and
+  one summary per physical DICOM folder.
+- `stage-01-audit.csv` — the same per-folder audit summary for spreadsheets,
+  including duplicate/misfiled counts and differing metadata fields.
+- `stage-02-report.json` — files retained versus copied to `review/`.
+- `stage-03-report.json` — archive checksum and a `series_inventory` with the
+  first original and final DICOM filename for every series.
+
+The audit table and CSV flag differences in Patient ID/name, study UID/date/
+time, and series UID/number/description/protocol within a DICOM folder.
 
 Compression is always `.tar.gz`.
 
@@ -235,10 +246,10 @@ gitignored and never committed — it may contain identifying information.
 
 ```mermaid
 flowchart TD
-    SOURCE["Raw scanner export"] --> ARCHIVE["source_archive<br/>Verified tarball + checksum (source/)"]
-    ARCHIVE --> CAPTURE["capture<br/>Copies readable DICOM into working/"]
-    ARCHIVE --> AUDIT["audit<br/>Structural QA per subject"]
-    AUDIT --> REPORT1["stage-01-report.json"]
+    SOURCE["Raw scanner export"] --> CAPTURE["capture<br/>Copies readable DICOM into working/"]
+    CAPTURE --> ARCHIVE["source_archive<br/>Per-study verified tarball + checksum (source/)"]
+    ARCHIVE --> AUDIT["audit<br/>Structural and metadata QA per subject"]
+    AUDIT --> REPORT1["stage-01-report.json<br/>stage-01-audit.csv"]
     AUDIT --> SIFT["sift<br/>Splits retained vs review files"]
     SIFT --> REPORT2["stage-02-report.json"]
     SIFT --> RECTIFY["rectify<br/>Metadata-sorted, renamed DICOM tree"]
