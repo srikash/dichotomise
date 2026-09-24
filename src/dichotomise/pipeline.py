@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from dichotomise.errors import RelabelError
@@ -14,7 +14,7 @@ from dichotomise.pydcm.relabel import (
     validate_label,
 )
 from dichotomise.run import Run, start_run
-from dichotomise.stages.audit import audit
+from dichotomise.stages.audit import AuditResult, audit
 from dichotomise.stages.capture import CapturedSubject, capture
 from dichotomise.stages.finalise import finalise
 from dichotomise.stages.rectify import rectify
@@ -87,6 +87,7 @@ def _process_subject(
     new_id: str | None,
     subject_mappings: Mapping[str, str] | None,
     used_labels: set[str],
+    on_audit: Callable[[AuditResult], None] | None,
 ) -> None:
     # The replacement label depends only on `subject` and the CLI's own
     # inputs, not on anything audit/sift/rectify produce, so it can be
@@ -100,6 +101,8 @@ def _process_subject(
     reports_dir = _reports_dir_for(run, subject, subject_label)
 
     audit_result = audit(subject)
+    if on_audit is not None:
+        on_audit(audit_result)
     write_audit_report(audit_result, reports_dir, subject_label=subject_label)
 
     sift_result = sift(audit_result)
@@ -136,6 +139,7 @@ def run_pipeline(
     new_id: str | None = None,
     subject_mappings: Mapping[str, str] | None = None,
     keep_working_files: bool = False,
+    on_audit: Callable[[AuditResult], None] | None = None,
 ) -> Run:
     """Run the full dichotomise pipeline over every subject found under `source_dir`.
 
@@ -169,6 +173,7 @@ def run_pipeline(
                 new_id=new_id,
                 subject_mappings=subject_mappings,
                 used_labels=used_labels,
+                on_audit=on_audit,
             )
         if not keep_working_files:
             shutil.rmtree(run.working_dir)

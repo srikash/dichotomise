@@ -26,12 +26,12 @@ def _metadata(**overrides: object) -> DicomMetadata:
     return DicomMetadata(**defaults)  # type: ignore[arg-type]
 
 
-def test_rectified_path_matches_the_agreed_naming_scheme() -> None:
+def test_rectified_path_uses_the_series_description_for_the_folder_name() -> None:
     base_dir = Path("/rectified")
 
     result = rectified_path(base_dir, _metadata())
 
-    assert result == (base_dir / "021-DWI_64_dir" / "021_1.2.840.10008.5.1.4.1.1.4.99_0005_e01.dcm")
+    assert result == (base_dir / "021-diffusion" / "021_1.2.840.10008.5.1.4.1.1.4.99_0005_e01.dcm")
 
 
 def test_rectified_path_pads_series_instance_and_echo_numbers() -> None:
@@ -45,8 +45,8 @@ def test_rectified_path_pads_series_instance_and_echo_numbers() -> None:
     assert "_0042_e09.dcm" in result.name
 
 
-def test_rectified_path_falls_back_to_na_for_blank_protocol_name() -> None:
-    result = rectified_path(Path("/rectified"), _metadata(protocol_name=""))
+def test_rectified_path_falls_back_to_na_for_blank_series_description() -> None:
+    result = rectified_path(Path("/rectified"), _metadata(series_description=""))
 
     assert result.parent.name == "021-NA"
 

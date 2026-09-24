@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +22,46 @@ def test_cli_runs_end_to_end_and_reports_the_archives(
     archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
     assert len(archives) == 1
     assert archives[0].name in result.output
+    assert "DICOM inventory" in result.output
+    assert "Series folder" in result.output
+    assert "Pass" in result.output
+    assert "Audit and archive summary" in result.output
+
+
+def test_cli_help_groups_required_and_optional_flags() -> None:
+    result = CliRunner().invoke(cli, ["--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "Required flags" in result.output
+    assert "Optional flags" in result.output
+    assert "Usage" in result.output
+    assert "Basic run" in result.output
+    assert "[required]" not in result.output
+
+
+def test_cli_audit_table_reports_metadata_and_structural_findings(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    first_file = make_dicom_file(
+        source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a"
+    )
+    shutil.copy2(first_file, source / "series" / "2.dcm")
+    make_dicom_file(
+        source / "series" / "3.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="study-a",
+        SeriesNumber=2,
+        SeriesDescription="other_series",
+        ProtocolName="other_series",
+    )
+
+    result = CliRunner().invoke(
+        cli, ["--source-dir", str(source), "--out-dir", str(tmp_path / "out")]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Failed" in result.output
 
 
 def test_cli_sanitise_infers_numerical_mode_from_subject_id(
