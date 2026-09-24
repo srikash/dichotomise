@@ -1,21 +1,35 @@
-# dichotomise
+# dichotomise [![Version](https://img.shields.io/badge/version-1.9.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v1.9.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml)
+<b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
+de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
 
-A command-line tool for auditing, sorting, rectifying, and archiving DICOM
-exports from Siemens XA60+ systems.
+### The default export
 
-## The XA60+ export makes file identity depend on its folder
+For a given study, the XA60+ export places DICOMs from each series into sub-folders named:
+```text
+<ProtocolName>_<SeriesNumber>_MR/
+```
 
-Siemens XA60+ exports commonly place each series in a directory such as
-`<ProtocolName>_<SeriesNumber>_MR/`. Inside, files are named `1.dcm`, `2.dcm`,
-and so on. The numbering starts again in every series folder and recurs across
-subject exports. Two unrelated DICOMs can therefore have the same filename.
+The DICOMs inside are named `1.dcm`, `2.dcm`, and so on. The numbering starts again in 
+every series folder and recurs across subject exports. 
+
+```text
+subject-export/
+  DWI_21_MR/
+    1.dcm
+    2.dcm
+  fMRI_22_MR/
+    1.dcm
+    2.dcm
+```
+`1.dcm` in one series may be entirely unrelated to `1.dcm` in another. The
+files can contain different acquisitions and have different file sizes.
 
 ## Why repeated filenames are positively dreadful
 
-### TL;DR: XA60+ replaced distinct filenames with repeated counters
+#### TL;DR
 
 Naming files `1.dcm`, `2.dcm`, `3.dcm` is the worst possible choice. It is a
-regression:
+regression from something that previously worked well.
 
 | Export | File naming |
 |---|---|
@@ -23,8 +37,8 @@ regression:
 | XA30 exports | Distinct `.dcm` filenames |
 | XA60+ exports | `1.dcm`, `2.dcm`, … repeated in every series folder |
 
-Every DICOM carries a globally unique SOP Instance UID. XA60+ retains that
-identifier in the header but does not use it to distinguish the exported
+Every DICOM carries a globally unique SOP Instance UID. The XA60 export retains 
+that identifier in the header but does not use it to distinguish the exported
 filename. The file's name identifies it only while its surrounding folder
 structure remains intact. That is a data-integrity problem at the point of
 export, before a researcher runs a pipeline or moves a file.
@@ -34,7 +48,7 @@ data. The DICOM header supplies one; the exported filename hides it from
 ordinary file operations. BIDS takes the opposite approach to filenames: its
 applicable entities identify the data within the filename itself.
 
-### The new export style violates basic principles of reliable data handling
+### The new export format is the antithesis of good data-handling practice
 
 1. **Give each file a usable identity.** XA60+ assigns the same name to
    unrelated DICOMs. A file separated from its folder cannot be identified by
@@ -67,12 +81,13 @@ applicable entities identify the data within the filename itself.
    [Example Incident 2](#incident-2-interleaved-dwi-duplication) shows
    why a plausible filename sequence cannot serve as an audit.
 
-### Two incidents found by inspecting scanner exports
+### Two example incidents (from amongst several)
 
 We noticed inconsistencies in scanner exports and inspected the DICOM metadata
 manually. Both incidents below were present before anyone copied, moved or
 processed the files. They are examples of the intermittent, inconsistent
-errors we have encountered, not an exhaustive list.
+errors we have encountered, not an exhaustive list. Happens with product sequences 
+and C2Ps alike.
 
 #### Incident 1: DICOM placed in the wrong series
 
@@ -87,7 +102,7 @@ inspection found that duplicates were randomly interleaved with the original
 files, rather than appended as a second sequence. The filename range and file
 count alone could not show which files were duplicated.
 
-## dichotomise audits identity before organising DICOMs
+# dichotomise to the rescue
 
 `dichotomise` addresses this failure at ingestion. It reads identity from
 DICOM metadata rather than trusting exported filenames or series folders. It
