@@ -4,6 +4,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from click import unstyle
 from click.testing import CliRunner
 
 from dichotomise.cli import cli
@@ -69,21 +70,23 @@ def test_cli_qc_rejects_an_output_directory(tmp_path: Path) -> None:
     source.mkdir()
 
     result = CliRunner().invoke(
-        cli, ["--qc", "--source-dir", str(source), "--out-dir", str(tmp_path / "out")]
+        cli,
+        ["--qc", "--source-dir", str(source), "--out-dir", str(tmp_path / "out")],
+        env={"FORCE_COLOR": "1"},
     )
 
     assert result.exit_code != 0
-    assert "--qc only accepts --source-dir" in result.output
+    assert "--qc only accepts --source-dir" in unstyle(result.output)
 
 
 def test_cli_requires_output_directory_outside_qc(tmp_path: Path) -> None:
     source = tmp_path / "export"
     source.mkdir()
 
-    result = CliRunner().invoke(cli, ["--source-dir", str(source)])
+    result = CliRunner().invoke(cli, ["--source-dir", str(source)], env={"FORCE_COLOR": "1"})
 
     assert result.exit_code != 0
-    assert "--out-dir is required unless --qc is used." in result.output
+    assert "--out-dir is required unless --qc is used." in unstyle(result.output)
 
 
 def test_cli_audit_table_reports_metadata_and_structural_findings(
