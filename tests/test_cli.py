@@ -34,7 +34,9 @@ def test_cli_help_groups_required_and_optional_flags() -> None:
     result = CliRunner().invoke(cli, ["--help"])
 
     assert result.exit_code == 0, result.output
-    assert "Required flags" in result.output
+    assert "Input (required)" in result.output
+    assert "Output (standard runs)" in result.output
+    assert "QC mode" in result.output
     assert "Optional flags" in result.output
     assert "Usage" in result.output
     assert "Single-Subject mode" in result.output
@@ -44,6 +46,44 @@ def test_cli_help_groups_required_and_optional_flags() -> None:
     assert "--sanitise-level" not in result.output
     assert "--subj-id" in result.output
     assert "--subject-id" not in result.output
+
+
+def test_cli_qc_audits_in_place_without_creating_output(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+    out_dir = tmp_path / "out"
+
+    result = CliRunner().invoke(cli, ["--qc", "--source-dir", str(source)])
+
+    assert result.exit_code == 0, result.output
+    assert "DICOM inventory" in result.output
+    assert "Series folder" in result.output
+    assert "QC complete; no files or folders were created." in result.output
+    assert not out_dir.exists()
+
+
+def test_cli_qc_rejects_an_output_directory(tmp_path: Path) -> None:
+    source = tmp_path / "export"
+    source.mkdir()
+
+    result = CliRunner().invoke(
+        cli, ["--qc", "--source-dir", str(source), "--out-dir", str(tmp_path / "out")]
+    )
+
+    assert result.exit_code != 0
+    assert "--qc only accepts --source-dir" in result.output
+
+
+def test_cli_requires_output_directory_outside_qc(tmp_path: Path) -> None:
+    source = tmp_path / "export"
+    source.mkdir()
+
+    result = CliRunner().invoke(cli, ["--source-dir", str(source)])
+
+    assert result.exit_code != 0
+    assert "--out-dir is required unless --qc is used." in result.output
 
 
 def test_cli_audit_table_reports_metadata_and_structural_findings(

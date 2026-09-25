@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,15 +21,30 @@ from rich_click.rich_command import RichCommand
 
 from dichotomise.errors import DichotomiseError
 from dichotomise.pipeline import run_pipeline
-from dichotomise.stages.audit import AuditedFile, AuditResult, metadata_inconsistencies
+from dichotomise.stages.audit import (
+    AuditedFile,
+    AuditResult,
+    audit_directory,
+    metadata_inconsistencies,
+)
 from dichotomise.utils.console import console, error, success
 
 rich_click_config.OPTION_GROUPS = {
     "dichotomise": [
         {
-            "name": "Required flags",
-            "options": ["--source-dir", "--out-dir"],
+            "name": "Input (required)",
+            "options": ["--source-dir"],
             "title_style": "bold red",
+        },
+        {
+            "name": "Output (standard runs)",
+            "options": ["--out-dir"],
+            "title_style": "bold red",
+        },
+        {
+            "name": "QC mode",
+            "options": ["--qc"],
+            "title_style": "bold yellow",
         },
         {
             "name": "Optional flags",
@@ -56,6 +72,18 @@ _EXAMPLE_COMMAND = (
     "[bold cyan]--source-dir[/] [green]/path/to/scanner_export[/] "
     "[bold cyan]--out-dir[/] [green]/path/to/fixed_export[/]"
 )
+
+
+@dataclass(frozen=True)
+class ProcessingOptions:
+    """Validated pipeline options assembled from the command-line flags."""
+
+    sanitise: bool
+    sanitise_policy: str
+    subject_id: str | None
+    new_id: str | None
+    label_mode: str
+    subject_mappings: dict[str, str] | None
 
 
 class DichotomiseCommand(RichCommand):
@@ -95,10 +123,22 @@ class DichotomiseCommand(RichCommand):
             border_style="yellow",
             padding=(0, 1),
         )
+        qc_mode = Panel(
+            Text.from_markup(
+                "[bold white]dichotomise[/] [bold cyan]--qc[/] "
+                "[bold cyan]--source-dir[/] [green]/path/to/scanner_export[/]\n"
+                "Prints the DICOM audit table only; no files or folders are created."
+            ),
+            title=Text.from_markup("[bold yellow]QC mode[/]"),
+            title_align="left",
+            border_style="yellow",
+            padding=(0, 1),
+        )
         content = Group(
             Text.from_markup("[bold orange1]Usage Guide:[/]"),
             Padding(single_subject, (1, 0, 0, 0)),
             Padding(multi_subject, (1, 0, 0, 0)),
+            Padding(qc_mode, (1, 0, 0, 0)),
         )
         formatter.write(Padding(content, formatter.config.padding_epilog))
 
@@ -265,6 +305,87 @@ def _load_mapping_file(path: Path) -> dict[str, str]:
     return loaded_mapping
 
 
+def _run_qc(
+    source_dir: Path,
+    out_dir: Path | None,
+    sanitise: bool,
+    sanitise_policy: str | None,
+    subject_id: str | None,
+    new_id: str | None,
+    random_name: bool,
+    mapping: tuple[str, ...],
+    mapping_file: Path | None,
+    keep_working_files: bool,
+) -> None:
+    """Print an in-place audit after ensuring no processing option was selected."""
+    incompatible_options = (
+        out_dir is not None,
+        sanitise,
+        sanitise_policy is not None,
+        subject_id is not None,
+        new_id is not None,
+        random_name,
+        bool(mapping),
+        mapping_file is not None,
+        keep_working_files,
+    )
+    if any(incompatible_options):
+        raise click.UsageError(
+            "--qc only accepts --source-dir and cannot be combined with processing options."
+        )
+    console.print(f"[bold]dichotomise[/bold] auditing {source_dir}")
+    try:
+        _print_audit_table(audit_directory(source_dir))
+    except DichotomiseError as failure:
+        error(str(failure))
+        raise SystemExit(1) from failure
+    success("QC complete; no files or folders were created.")
+
+
+def _prepare_processing_options(
+    sanitise: bool,
+    sanitise_policy: str | None,
+    subject_id: str | None,
+    new_id: str | None,
+    random_name: bool,
+    mapping: tuple[str, ...],
+    mapping_file: Path | None,
+) -> ProcessingOptions:
+    """Validate and normalise options used by a standard pipeline run."""
+    if random_name and sanitise_policy is not None:
+        raise click.UsageError("--random-name cannot be combined with --sanitise-policy.")
+    sanitise = sanitise or sanitise_policy is not None or random_name
+    label_sources = sum(
+        (subject_id is not None, new_id is not None, bool(mapping), mapping_file is not None)
+    )
+    if label_sources > 1:
+        raise click.UsageError(
+            "Choose only one of --subj-id, --new-id, --mapping, or --mapping-file."
+        )
+    if not sanitise and label_sources:
+        raise click.UsageError("Replacement-label options require --sanitise or --sanitise-policy.")
+
+    effective_policy = sanitise_policy or "minimal"
+    subject_mappings = _parse_inline_mappings(mapping) if mapping else None
+    if mapping_file is not None:
+        subject_mappings = _load_mapping_file(mapping_file)
+    label_mode = "random" if random_name else _infer_label_mode(subject_id, new_id)
+    if sanitise and label_sources == 0:
+        if effective_policy == "minimal":
+            label_mode = "random"
+        else:
+            label_mode = "numerical"
+            subject_id = "1"
+    return ProcessingOptions(
+        sanitise=sanitise,
+        sanitise_policy=effective_policy,
+        subject_id=subject_id,
+        new_id=new_id,
+        label_mode=label_mode,
+        subject_mappings=subject_mappings,
+    )
+
+
 @click.command(
     cls=DichotomiseCommand,
     help=(
@@ -287,15 +408,20 @@ def _load_mapping_file(path: Path) -> dict[str, str]:
     "--source-dir",
     type=click.Path(path_type=Path, exists=True, file_okay=False),
     required=True,
-    panel="Required flags",
+    panel="Input (required)",
     help="Input directory to be processed. Can be single- or multi-subject directory.",
 )
 @click.option(
     "--out-dir",
     type=click.Path(path_type=Path, file_okay=False),
-    required=True,
-    panel="Required flags",
-    help="Output directory for dichotomised results.",
+    panel="Output (standard runs)",
+    help="Output directory for dichotomised results; required unless --qc is used.",
+)
+@click.option(
+    "--qc",
+    is_flag=True,
+    panel="QC mode",
+    help="Audit source DICOMs in place and print tables only; never write files.",
 )
 @click.option(
     "--sanitise",
@@ -353,7 +479,8 @@ def _load_mapping_file(path: Path) -> dict[str, str]:
 )
 def cli(
     source_dir: Path,
-    out_dir: Path,
+    out_dir: Path | None,
+    qc: bool,
     sanitise: bool,
     sanitise_policy: str | None,
     subject_id: str | None,
@@ -364,41 +491,44 @@ def cli(
     keep_working_files: bool,
 ) -> None:
     """Run the standard, end-to-end dichotomise pipeline."""
-    if random_name and sanitise_policy is not None:
-        raise click.UsageError("--random-name cannot be combined with --sanitise-policy.")
-    sanitise = sanitise or sanitise_policy is not None or random_name
-    label_sources = sum(
-        (subject_id is not None, new_id is not None, bool(mapping), mapping_file is not None)
-    )
-    if label_sources > 1:
-        raise click.UsageError(
-            "Choose only one of --subj-id, --new-id, --mapping, or --mapping-file."
+    if qc:
+        _run_qc(
+            source_dir,
+            out_dir,
+            sanitise,
+            sanitise_policy,
+            subject_id,
+            new_id,
+            random_name,
+            mapping,
+            mapping_file,
+            keep_working_files,
         )
-    if not sanitise and label_sources:
-        raise click.UsageError("Replacement-label options require --sanitise or --sanitise-policy.")
-    effective_sanitise_policy = sanitise_policy or "minimal"
-    subject_mappings = _parse_inline_mappings(mapping) if mapping else None
-    if mapping_file is not None:
-        subject_mappings = _load_mapping_file(mapping_file)
-    label_mode = "random" if random_name else _infer_label_mode(subject_id, new_id)
-    if sanitise and label_sources == 0:
-        if effective_sanitise_policy == "minimal":
-            label_mode = "random"
-        else:
-            label_mode = "numerical"
-            subject_id = "1"
+        return
+
+    if out_dir is None:
+        raise click.UsageError("--out-dir is required unless --qc is used.")
+    options = _prepare_processing_options(
+        sanitise,
+        sanitise_policy,
+        subject_id,
+        new_id,
+        random_name,
+        mapping,
+        mapping_file,
+    )
 
     console.print(f"[bold]dichotomise[/bold] processing {source_dir}")
     try:
         run = run_pipeline(
             source_dir,
             out_dir,
-            sanitise_requested=sanitise,
-            sanitise_level=effective_sanitise_policy,
-            label_mode=label_mode,
-            subject_id=subject_id,
-            new_id=new_id,
-            subject_mappings=subject_mappings,
+            sanitise_requested=options.sanitise,
+            sanitise_level=options.sanitise_policy,
+            label_mode=options.label_mode,
+            subject_id=options.subject_id,
+            new_id=options.new_id,
+            subject_mappings=options.subject_mappings,
             keep_working_files=keep_working_files,
             on_audit=_print_audit_table,
             on_stage=_log_stage,

@@ -187,6 +187,15 @@ uv run dichotomise --help
 dichotomise --source-dir ./study/sub-001 --out-dir ./dichotomise-runs
 ```
 
+To inspect an export without creating an output directory or saving a report:
+
+```bash
+dichotomise --qc --source-dir ./study/sub-001
+```
+
+`--qc` reads the DICOMs in place and prints the Rich audit table in the
+terminal. It never copies, changes, archives, or writes files.
+
 `--source-dir` accepts either one subject/session export or a scanner export
 containing multiple subjects — they are discovered from DICOM metadata, so
 folder names do not need to be sensible.
@@ -194,7 +203,8 @@ folder names do not need to be sensible.
 | Flag | Purpose |
 |---|---|
 | `--source-dir` (required) | Raw DICOM directory to process. |
-| `--out-dir` (required) | Parent directory for the timestamped output folder. |
+| `--out-dir` | Parent directory for the timestamped output folder. Required unless `--qc` is used. |
+| `--qc` | Audit the source DICOMs in place and print tables only. Cannot be combined with processing flags. |
 | `--sanitise` | Replace patient identity before final archiving. This uses `minimal` unless a policy is chosen. |
 | `--sanitise-policy` | JSON policy name: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Both `custom` and `custom.json` are accepted. Implies `--sanitise`. |
 | `--subj-id` | First numerical replacement ID. For one study, `6` produces `sub-0006`. With several studies, IDs are enumerated automatically as `sub-0006`, `sub-0007`, `sub-0008`, and so on; the CLI logs a warning. |

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from dichotomise.stages.audit import audit
+from dichotomise.stages.audit import audit, audit_directory
 from dichotomise.stages.capture import CapturedSubject
 
 
@@ -82,3 +82,16 @@ def test_audit_flags_duplicate_and_misfiled_files(
     assert len(ok_files) == 4
     misfiled_paths = {f.metadata.path for f in result.files if f.is_misfiled}
     assert misfiled_paths == {capture_dir / "022-fMRI" / "3.dcm"}
+
+
+def test_audit_directory_checks_source_files_in_place(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source_dir = tmp_path / "source"
+    dicom_file = make_dicom_file(source_dir / "series" / "1.dcm", PatientID="scanner-01")
+
+    result = audit_directory(source_dir)
+
+    assert result.subject.directory == source_dir
+    assert [file.metadata.path for file in result.files] == [dicom_file]
+    assert list(source_dir.rglob("*")) == [source_dir / "series", dicom_file]
