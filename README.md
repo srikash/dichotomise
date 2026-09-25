@@ -1,4 +1,4 @@
-# dichotomise [![Version](https://img.shields.io/badge/version-1.9.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v1.9.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml)
+# dichotomise [![Version](https://img.shields.io/badge/version-2.0.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.0.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml)
 <b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
 de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
 
