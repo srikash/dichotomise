@@ -1,0 +1,17 @@
+{
+  "name": "minimal",
+  "description": "Identical to standard (identity and institution/device-operator removed, UIDs reissued, descriptive text kept), except: a generated, memorable pseudonym replaces both the patient name and patient ID, and the birth date is simply replaced with the study's own scan date rather than scrambled to a nearby year. This is the default sanitisation policy for workflows that later convert the output to NIfTI.",
+  "extends": "standard",
+  "actions": {
+    "PatientName": {
+      "action": "replace",
+      "value": "<subject-name>",
+      "note": "The readable form of the generated subject label, in DICOM Surname^Firstname form (e.g. Abrahall^Gracious). PatientID and output names use the same pseudonym in filesystem-safe form (abrahall_gracious)."
+    },
+    "PatientBirthDate": {
+      "action": "replace",
+      "value": "<scan-date>",
+      "note": "Overrides standard's scramble_date: here the birth date is simply the study's own scan date, not an approximate real one."
+    }
+  }
+}

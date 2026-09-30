@@ -1,0 +1,306 @@
+"""run_pipeline(): runs every stage in order and returns the finished Run."""
+
+from __future__ import annotations
+
+import shutil
+from collections.abc import Callable, Mapping
+from functools import partial
+from pathlib import Path
+from secrets import token_hex
+from time import monotonic
+from typing import TypeVar
+
+from dichotomise.errors import RelabelError
+from dichotomise.pydcm.names import generate_name
+from dichotomise.pydcm.relabel import (
+    load_policy,
+    normalise_numeric_label,
+    validate_label,
+)
+from dichotomise.run import Run, start_run
+from dichotomise.stages.audit import AuditResult, audit
+from dichotomise.stages.capture import CapturedSubject, capture
+from dichotomise.stages.finalise import finalise, finalise_review
+from dichotomise.stages.rectify import rectify, rectify_review
+from dichotomise.stages.reports import (
+    write_audit_report,
+    write_finalise_report,
+    write_retained_manifest,
+    write_review_manifest,
+    write_sift_report,
+    write_source_manifest,
+)
+from dichotomise.stages.sanitise import sanitise, sanitise_review
+from dichotomise.stages.sift import sift
+from dichotomise.stages.source_archive import source_archive
+from dichotomise.utils.text import safe_filename_text
+
+_T = TypeVar("_T")
+StageCallback = Callable[[str, str, float], None]
+WarningCallback = Callable[[str], None]
+
+
+def _run_stage(description: str, operation: Callable[[], _T], on_stage: StageCallback | None) -> _T:
+    """Run a pipeline stage and report its lifecycle to an optional caller."""
+    if on_stage is not None:
+        on_stage("started", description, 0.0)
+    started = monotonic()
+    try:
+        result = operation()
+    except BaseException:
+        if on_stage is not None:
+            on_stage("failed", description, monotonic() - started)
+        raise
+    if on_stage is not None:
+        on_stage("completed", description, monotonic() - started)
+    return result
+
+
+def _random_subject_label(used_labels: set[str]) -> str:
+    """Generate a unique, filesystem-safe pseudonym for one subject in this run."""
+    while len(used_labels) < 100_000:
+        given_name, _, surname = generate_name().rpartition("_")
+        label = f"{surname}_{given_name}"
+        if label not in used_labels:
+            used_labels.add(label)
+            return label
+    raise RelabelError("Could not generate a unique pseudonym for every subject in this run")
+
+
+def _resolve_subject_label(
+    subject: CapturedSubject,
+    label_mode: str,
+    subject_id: str | None,
+    new_id: str | None,
+    subject_mappings: Mapping[str, str] | None,
+    used_labels: set[str],
+) -> str:
+    """Work out the replacement label a sanitised run should use for one subject."""
+    if subject_mappings is not None:
+        try:
+            return validate_label(subject_mappings[subject.subject_id])
+        except KeyError as error:
+            raise RelabelError(
+                f"No replacement ID was supplied for source subject {subject.subject_id!r}"
+            ) from error
+    if label_mode == "numerical":
+        if not subject_id:
+            raise RelabelError("Numerical replacement labels need a numerical subject ID")
+        start_number = int(normalise_numeric_label(subject_id).removeprefix("sub-"))
+        return normalise_numeric_label(str(start_number + subject.output_number - 1))
+    if label_mode == "custom":
+        if not new_id:
+            raise RelabelError("Custom replacement labels need a replacement ID")
+        label = validate_label(new_id)
+        return label if label.startswith("sub-") else f"sub-{label}"
+    if label_mode == "random":
+        return _random_subject_label(used_labels)
+    raise RelabelError(f"Unsupported replacement-label mode: {label_mode}")
+
+
+def _random_output_token(used_tokens: set[str]) -> str:
+    """Return a unique six-character hexadecimal token for one study output."""
+    while len(used_tokens) < 16_777_216:
+        token = token_hex(3)
+        if token not in used_tokens:
+            used_tokens.add(token)
+            return token
+    raise RelabelError("Could not create a unique output token for every study")
+
+
+def _reports_dir_for(run: Run, subject_label: str, output_token: str) -> Path:
+    """Return this study's collision-safe directory under reports/."""
+    return run.reports_dir / f"{safe_filename_text(subject_label)}_{output_token}"
+
+
+def _archive_source_subject(subject: CapturedSubject, run: Run) -> None:
+    """Archive one captured study before it is audited or transformed."""
+    source_archive(subject, run)
+
+
+def _process_subject(
+    subject: CapturedSubject,
+    run: Run,
+    *,
+    sanitise_requested: bool,
+    sanitise_level: str,
+    label_mode: str,
+    subject_id: str | None,
+    new_id: str | None,
+    subject_mappings: Mapping[str, str] | None,
+    used_labels: set[str],
+    used_output_tokens: set[str],
+    on_audit: Callable[[AuditResult], None] | None,
+    on_stage: StageCallback | None,
+) -> None:
+    # The replacement label depends only on `subject` and the CLI's own
+    # inputs, not on anything audit/sift/rectify produce, so it can be
+    # resolved upfront and every report written straight to its final
+    # location, rather than staged under a temporary name and renamed later.
+    subject_label = subject.subject_id
+    if sanitise_requested:
+        subject_label = _resolve_subject_label(
+            subject, label_mode, subject_id, new_id, subject_mappings, used_labels
+        )
+    output_token = _random_output_token(used_output_tokens)
+    reports_dir = _reports_dir_for(run, subject_label, output_token)
+    write_source_manifest(subject, reports_dir)
+
+    subject_prefix = f"Study {subject.output_number}"
+    audit_result = _run_stage(f"{subject_prefix}: auditing", lambda: audit(subject), on_stage)
+    if on_audit is not None:
+        on_audit(audit_result)
+    write_audit_report(audit_result, reports_dir, subject_label=subject_label)
+
+    sift_result = _run_stage(
+        f"{subject_prefix}: sorting review files", lambda: sift(audit_result), on_stage
+    )
+    write_retained_manifest(sift_result, reports_dir)
+    write_review_manifest(sift_result, reports_dir)
+
+    rectify_result = _run_stage(
+        f"{subject_prefix}: rectifying retained files", lambda: rectify(sift_result), on_stage
+    )
+    rectify_review_result = _run_stage(
+        f"{subject_prefix}: renaming review files", lambda: rectify_review(sift_result), on_stage
+    )
+
+    sanitise_result = None
+    sanitise_review_result = None
+    if sanitise_requested:
+        policy = load_policy(sanitise_level)
+        replacement_cache: dict[str, str] = {}
+        sanitise_result = _run_stage(
+            f"{subject_prefix}: sanitising files",
+            lambda: sanitise(
+                rectify_result,
+                policy=policy,
+                subject_label=subject_label,
+                replacement_cache=replacement_cache,
+            ),
+            on_stage,
+        )
+        sanitise_review_result = _run_stage(
+            f"{subject_prefix}: sanitising review files",
+            lambda: sanitise_review(
+                rectify_review_result,
+                policy=policy,
+                subject_label=subject_label,
+                scan_date=subject.scan_date,
+                replacement_cache=replacement_cache,
+            ),
+            on_stage,
+        )
+
+    review_archive = _run_stage(
+        f"{subject_prefix}: archiving review files",
+        lambda: finalise_review(
+            rectify_review_result,
+            run,
+            subject_label=subject_label,
+            archive_token=output_token,
+            sanitise_review_result=sanitise_review_result,
+        ),
+        on_stage,
+    )
+    write_sift_report(
+        sift_result,
+        reports_dir,
+        rectify_review_result=rectify_review_result,
+        review_archive=review_archive,
+        review_sanitised=sanitise_requested,
+    )
+
+    finalise_result = _run_stage(
+        f"{subject_prefix}: creating verified archive",
+        lambda: finalise(
+            rectify_result,
+            run,
+            subject_label=subject_label,
+            sanitise_result=sanitise_result,
+            archive_token=output_token,
+        ),
+        on_stage,
+    )
+    file_count = len(sanitise_result.files) if sanitise_result else len(rectify_result.files)
+    write_finalise_report(
+        finalise_result,
+        reports_dir,
+        file_count=file_count,
+        sanitised=sanitise_requested,
+        sanitise_level=sanitise_level if sanitise_requested else None,
+        audit_result=audit_result,
+        rectify_result=rectify_result,
+        sanitise_result=sanitise_result,
+    )
+
+
+def run_pipeline(
+    source_dir: Path,
+    out_dir: Path,
+    *,
+    sanitise_requested: bool = False,
+    sanitise_level: str = "minimal",
+    label_mode: str = "random",
+    subject_id: str | None = None,
+    new_id: str | None = None,
+    subject_mappings: Mapping[str, str] | None = None,
+    keep_working_files: bool = False,
+    on_audit: Callable[[AuditResult], None] | None = None,
+    on_stage: StageCallback | None = None,
+    on_warning: WarningCallback | None = None,
+) -> Run:
+    """Run the full dichotomise pipeline over every subject found under `source_dir`.
+
+    `sanitise_level` selects a policy filename (see docs/sanitise-policies.md).
+    The command line chooses the internal label mode from the selected policy
+    and any numerical, exact, or mapped replacement ID supplied.
+    """
+    run = start_run(out_dir)
+    try:
+        subjects = _run_stage(
+            "Capturing DICOMs by study", lambda: capture(source_dir, run), on_stage
+        )
+        if new_id is not None and len(subjects) != 1:
+            raise RelabelError("--new-id may only be used when the source contains one subject.")
+        if subject_id is not None and len(subjects) != 1 and on_warning is not None:
+            on_warning(
+                "Multiple studies found with --subj-id; numbering replacement IDs sequentially."
+            )
+        if subject_mappings is not None:
+            source_ids = {subject.subject_id for subject in subjects}
+            unknown_ids = set(subject_mappings) - source_ids
+            if unknown_ids:
+                raise RelabelError(
+                    "Mappings were supplied for source IDs not found in this export: "
+                    + ", ".join(sorted(unknown_ids))
+                )
+        used_labels: set[str] = set()
+        used_output_tokens: set[str] = set()
+        for subject in subjects:
+            _run_stage(
+                f"Study {subject.output_number}: archiving source DICOMs",
+                partial(_archive_source_subject, subject, run),
+                on_stage,
+            )
+            _process_subject(
+                subject,
+                run,
+                sanitise_requested=sanitise_requested,
+                sanitise_level=sanitise_level,
+                label_mode=label_mode,
+                subject_id=subject_id,
+                new_id=new_id,
+                subject_mappings=subject_mappings,
+                used_labels=used_labels,
+                used_output_tokens=used_output_tokens,
+                on_audit=on_audit,
+                on_stage=on_stage,
+            )
+        if not keep_working_files:
+            _run_stage("Cleaning working files", lambda: shutil.rmtree(run.working_dir), on_stage)
+    except BaseException:
+        run.set_status("failed")
+        raise
+    run.set_status("complete")
+    return run

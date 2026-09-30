@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Runs dichotomise inside its published container, presenting the exact same
+# CLI as the native `dichotomise` command. Only --source-dir, --out-dir, and
+# --mapping-file carry host filesystem paths; every other flag (including
+# --help) is passed straight through to the real CLI running in the
+# container, so this script never has to reimplement or duplicate its option
+# parsing or help text.
+set -euo pipefail
+
+readonly IMAGE="ghcr.io/srikash/dichotomise"
+readonly VERSION="${DICHOTOMISE_VERSION:-latest}"
+
+detect_engine() {
+  if [[ -n "${DICHOTOMISE_ENGINE:-}" ]]; then
+    echo "$DICHOTOMISE_ENGINE"
+    return
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    echo "docker"
+  elif command -v apptainer >/dev/null 2>&1; then
+    echo "apptainer"
+  elif command -v singularity >/dev/null 2>&1; then
+    echo "singularity"
+  else
+    echo "Neither docker nor apptainer/singularity was found on PATH." >&2
+    echo "Install one of them, or set DICHOTOMISE_ENGINE explicitly." >&2
+    exit 1
+  fi
+}
+
+# Rewritten argv to hand to the container, and the bind mounts it needs.
+rewritten_args=()
+docker_mounts=()
+apptainer_binds=()
+
+bind_path() {
+  local host_path="$1" container_path="$2" mode="$3"
+  docker_mounts+=("-v" "${host_path}:${container_path}:${mode}")
+  apptainer_binds+=("--bind" "${host_path}:${container_path}:${mode}")
+}
+
+# Splits a "--flag=value" argument, or reads the next positional argument for
+# a bare "--flag value" pair. Echoes the value and, for the latter form,
+# signals the caller to also consume the next argument.
+resolve_value() {
+  local arg="$1"
+  if [[ "$arg" == *=* ]]; then
+    echo "${arg#*=}"
+  else
+    echo ""
+  fi
+}
+
+args=("$@")
+i=0
+while [[ $i -lt ${#args[@]} ]]; do
+  arg="${args[$i]}"
+  case "$arg" in
+    --source-dir=* | --out-dir=* | --mapping-file=*)
+      flag="${arg%%=*}"
+      value="$(resolve_value "$arg")"
+      ;;
+    --source-dir | --out-dir | --mapping-file)
+      flag="$arg"
+      i=$((i + 1))
+      value="${args[$i]:-}"
+      ;;
+    *)
+      rewritten_args+=("$arg")
+      i=$((i + 1))
+      continue
+      ;;
+  esac
+
+  case "$flag" in
+    --source-dir)
+      host_path="$(cd "$value" && pwd)"
+      bind_path "$host_path" "/mnt/source" "ro"
+      rewritten_args+=("--source-dir" "/mnt/source")
+      ;;
+    --out-dir)
+      mkdir -p "$value"
+      host_path="$(cd "$value" && pwd)"
+      bind_path "$host_path" "/mnt/out" "rw"
+      rewritten_args+=("--out-dir" "/mnt/out")
+      ;;
+    --mapping-file)
+      host_dir="$(cd "$(dirname "$value")" && pwd)"
+      base_name="$(basename "$value")"
+      bind_path "$host_dir" "/mnt/mapping" "ro"
+      rewritten_args+=("--mapping-file" "/mnt/mapping/${base_name}")
+      ;;
+  esac
+  i=$((i + 1))
+done
+
+engine="$(detect_engine)"
+
+case "$engine" in
+  docker)
+    exec docker run --rm -u "$(id -u):$(id -g)" \
+      "${docker_mounts[@]}" \
+      "${IMAGE}:${VERSION}" \
+      "${rewritten_args[@]}"
+    ;;
+  apptainer | singularity)
+    exec "$engine" run \
+      "${apptainer_binds[@]}" \
+      "oras://${IMAGE}:${VERSION}-sif" \
+      "${rewritten_args[@]}"
+    ;;
+  *)
+    echo "Unsupported DICHOTOMISE_ENGINE: $engine (expected docker, apptainer, or singularity)" >&2
+    exit 1
+    ;;
+esac
