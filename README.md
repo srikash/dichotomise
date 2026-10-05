@@ -20,6 +20,7 @@ de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
 - [Sanitisation](#sanitisation)
 - [Layout](#layout)
 - [Development](#development)
+- [Citing dichotomise](#citing-dichotomise)
 - [The dichotomise workflow](#the-dichotomise-workflow)
 
 -------
@@ -439,6 +440,17 @@ uv run mypy src
 
 `tests/data/` (real, non-synthetic scan exports used for some tests) is
 gitignored and never committed — it may contain identifying information.
+
+## Citing dichotomise
+
+Each release is archived on Zenodo with a DOI
+([![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)).
+Citation metadata (including the author and license) is in
+[`CITATION.cff`](CITATION.cff) — GitHub renders a "Cite this repository"
+button from it on the repo's main page, or cite it directly:
+
+> Kashyap, S. (2026). *dichotomise* [Computer software].
+> https://doi.org/10.5281/zenodo.23166271
 
 ## The dichotomise workflow
 
