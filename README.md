@@ -185,63 +185,56 @@ expert/stage-by-stage command.
 ## Installation
 
 `dichotomise` requires Python 3.11+. It is a standard, `pyproject.toml`-based
-Python package with no tool-specific runtime dependency: [uv](https://docs.astral.sh/uv/)
-is just the quickest way to install it into an isolated environment, and is
-what this README and the project's own CI use, but plain `pip`, a `venv`, and
-conda/mamba all work just as well.
+Python package with no tool-specific runtime dependency, so install it with
+whichever of these you already use.
 
-### Quickest: uv
-
-If you already have Python and `pip`:
+### venv
 
 ```bash
-python -m pip install --user uv
-```
-
-Otherwise, install uv directly:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-#### Install from PyPI (after release)
-
-```bash
-uv tool install --python 3.11 dichotomise
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install dichotomise
 dichotomise --help
 ```
 
-This creates an isolated environment for `dichotomise`. If Python 3.11 is not
-available, uv downloads it automatically.
+### conda / mamba
 
-#### Install from a source checkout
+`dichotomise` itself comes from PyPI, not conda-forge, so `pip install` still
+does the actual install, inside a conda/mamba-managed environment:
+
+```bash
+conda create -n dichotomise python=3.11
+conda activate dichotomise
+pip install dichotomise
+dichotomise --help
+```
+
+(`mamba` is a drop-in replacement for `conda` in both commands above.)
+
+### From a source checkout
 
 ```bash
 git clone https://github.com/srikash/dichotomise.git
+cd dichotomise
+pip install .            # or: pip install -e . for an editable install
+```
+
+### uv
+
+Included for continuity with this project's own development and CI setup,
+which uses [uv](https://docs.astral.sh/uv/); not required for everyday use.
+
+```bash
+# from PyPI, into an isolated tool environment
+uv tool install --python 3.11 dichotomise
+dichotomise --help
+
+# from a source checkout
 cd dichotomise
 uv venv --python 3.11
 uv sync --locked
 uv run dichotomise --help
 ```
-
-### pip, venv, or conda/mamba
-
-Just as valid, if you'd rather not add another tool:
-
-```bash
-# plain venv
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install dichotomise
-
-# conda / mamba (dichotomise itself comes from PyPI, not conda-forge)
-conda create -n dichotomise python=3.11
-conda activate dichotomise
-pip install dichotomise
-```
-
-From a source checkout, replace `pip install dichotomise` with
-`pip install .` (or `pip install -e .` for an editable install).
 
 ### Container images
 
