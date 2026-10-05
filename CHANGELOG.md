@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.6.3
+
+- No code changes; cuts a release/tag to trigger Zenodo DOI archiving via the GitHub release webhook.
+
 ## v2.6.2
 
 - More informative CLI output: an opening banner (version, source path, and either the output directory or "QC Mode"), a subject/file count right after capture, a live "Time elapsed" ticker while a run is in progress (interactive terminals only), and a total-time summary at the end.

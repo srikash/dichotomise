@@ -1,4 +1,4 @@
-# dichotomise [![Version](https://img.shields.io/badge/version-2.6.2-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.6.2) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml)
+# dichotomise [![Version](https://img.shields.io/badge/version-2.6.3-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.6.3) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml)
 <b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
 de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
 
@@ -184,7 +184,13 @@ expert/stage-by-stage command.
 
 ## Installation
 
-`dichotomise` requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+`dichotomise` requires Python 3.11+. It is a standard, `pyproject.toml`-based
+Python package with no tool-specific runtime dependency: [uv](https://docs.astral.sh/uv/)
+is just the quickest way to install it into an isolated environment, and is
+what this README and the project's own CI use, but plain `pip`, a `venv`, and
+conda/mamba all work just as well.
+
+### Quickest: uv
 
 If you already have Python and `pip`:
 
@@ -198,7 +204,7 @@ Otherwise, install uv directly:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Install from PyPI (after release)
+#### Install from PyPI (after release)
 
 ```bash
 uv tool install --python 3.11 dichotomise
@@ -208,7 +214,7 @@ dichotomise --help
 This creates an isolated environment for `dichotomise`. If Python 3.11 is not
 available, uv downloads it automatically.
 
-### Install from a source checkout
+#### Install from a source checkout
 
 ```bash
 git clone https://github.com/srikash/dichotomise.git
@@ -218,6 +224,25 @@ uv sync --locked
 uv run dichotomise --help
 ```
 
+### pip, venv, or conda/mamba
+
+Just as valid, if you'd rather not add another tool:
+
+```bash
+# plain venv
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install dichotomise
+
+# conda / mamba (dichotomise itself comes from PyPI, not conda-forge)
+conda create -n dichotomise python=3.11
+conda activate dichotomise
+pip install dichotomise
+```
+
+From a source checkout, replace `pip install dichotomise` with
+`pip install .` (or `pip install -e .` for an editable install).
+
 ### Container images
 
 Every tagged release also publishes a Docker image and an Apptainer/Singularity
@@ -226,10 +251,10 @@ installing Python packages directly isn't an option.
 
 ```bash
 # Docker
-docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.6.2 --help
+docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.6.3 --help
 
 # Apptainer / Singularity
-apptainer run oras://ghcr.io/srikash/dichotomise:2.6.2-sif --help
+apptainer run oras://ghcr.io/srikash/dichotomise:2.6.3-sif --help
 ```
 
 Mount your source and output directories under `/data` (the image's working
@@ -249,7 +274,7 @@ since it delegates straight into the containerized CLI), auto-detects
 ```
 
 Set `DICHOTOMISE_ENGINE=docker|apptainer` to force an engine, and
-`DICHOTOMISE_VERSION=2.6.2` (default `latest`) to pin a release.
+`DICHOTOMISE_VERSION=2.6.3` (default `latest`) to pin a release.
 
 ## Usage
 
