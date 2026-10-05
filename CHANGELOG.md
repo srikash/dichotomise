@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.6.4
+
+- README: document plain `venv` and conda/mamba as the primary install paths; `uv` is now its own section, kept for continuity with this project's dev/CI setup rather than presented as the default.
+- No other code changes; this is the release tagged with an actual GitHub release, to trigger Zenodo DOI archiving via its release webhook (v2.6.3 only got a git tag + PyPI/container publish).
+
 ## v2.6.3
 
 - No code changes; cuts a release/tag to trigger Zenodo DOI archiving via the GitHub release webhook.
