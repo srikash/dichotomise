@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import shutil
 import tarfile
 from pathlib import Path
 
+import pytest
+
+import dichotomise.utils.archive as archive_module
+from dichotomise.errors import ArchiveCreationError
 from dichotomise.utils.archive import make_tarball, make_tarball_from_files, verify_archive
 
 
@@ -96,3 +101,43 @@ def test_verify_archive_rejects_a_tampered_archive(tmp_path: Path) -> None:
         handle.write(b"unexpected extra bytes")
 
     assert verify_archive(archive.path, archive.checksum_path) is False
+
+
+def test_make_tarball_falls_back_to_the_stdlib_codec_without_pigz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(archive_module, "pigz_path", lambda: None)
+    source = _make_source(tmp_path)
+
+    archive = make_tarball(source, tmp_path / "study_archive.tar.gz")
+
+    with tarfile.open(archive.path, "r:gz") as tar:
+        assert "series-a/1.dcm" in tar.getnames()
+    assert verify_archive(archive.path, archive.checksum_path) is True
+
+
+@pytest.mark.skipif(shutil.which("pigz") is None, reason="pigz is not installed")
+def test_make_tarball_uses_pigz_when_available(tmp_path: Path) -> None:
+    source = _make_source(tmp_path)
+
+    archive = make_tarball(source, tmp_path / "study_archive.tar.gz")
+
+    with tarfile.open(archive.path, "r:gz") as tar:
+        assert "series-a/1.dcm" in tar.getnames()
+    assert verify_archive(archive.path, archive.checksum_path) is True
+
+
+def test_make_tarball_raises_when_pigz_exits_with_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A fake "pigz" that reads its input (so tarfile never sees a broken
+    # pipe) and then fails, to check the failure is surfaced rather than
+    # silently producing a truncated or empty archive.
+    fake_pigz = tmp_path / "fake-pigz"
+    fake_pigz.write_text("#!/bin/sh\ncat >/dev/null\nexit 7\n")
+    fake_pigz.chmod(0o755)
+    monkeypatch.setattr(archive_module, "pigz_path", lambda: str(fake_pigz))
+    source = _make_source(tmp_path)
+
+    with pytest.raises(ArchiveCreationError, match="status 7"):
+        make_tarball(source, tmp_path / "study_archive.tar.gz")

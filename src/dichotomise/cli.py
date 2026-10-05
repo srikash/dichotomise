@@ -33,6 +33,7 @@ from dichotomise.stages.audit import (
     audit_directory,
     metadata_inconsistencies,
 )
+from dichotomise.utils.archive import pigz_path
 from dichotomise.utils.console import console, error, success
 from dichotomise.utils.text import natural_sort_key
 
@@ -662,6 +663,8 @@ def cli(
     )
 
     _print_banner(source_dir)
+    if pigz_path() is not None:
+        _log_info("pigz found, using it.")
     if keep_working_files:
         _log_warning(
             "--keep-working-files uses a lot of disk space: a full second copy of "

@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.6.5
+
+- Archive creation (source, dichotomised, and review archives) now prefers `pigz` for gzip compression when it's on PATH -- parallel across CPU cores, versus the single-threaded stdlib `gzip`/`zlib` codec used otherwise. The CLI reports "pigz found, using it." up front when it's available.
+
 ## v2.6.4
 
 - README: document plain `venv` and conda/mamba as the primary install paths; `uv` is now its own section, kept for continuity with this project's dev/CI setup rather than presented as the default.

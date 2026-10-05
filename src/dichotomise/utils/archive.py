@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+import subprocess
 import tarfile
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from dichotomise.errors import ArchiveVerificationError
+from dichotomise.errors import ArchiveCreationError, ArchiveVerificationError
 
 ProgressCallback = Callable[[int, int], None]
+
+# gzip's own default, kept the same whichever compressor ends up writing.
+_GZIP_COMPRESSLEVEL = 9
+
+
+def pigz_path() -> str | None:
+    """Return the path to `pigz` if it's on PATH, else None.
+
+    Exposed so a caller (e.g. the CLI) can report once, up front, whether
+    the faster, parallel-gzip path will be used for this run's archives.
+    """
+    return shutil.which("pigz")
 
 
 @dataclass(frozen=True)
@@ -86,31 +100,84 @@ def make_tarball_from_files(
     )
 
 
-def _write_tarball(
-    entries: Iterable[tuple[Path, Path]],
-    archive_path: Path,
+def _add_entries(
+    tar: tarfile.TarFile,
+    entries: Sequence[tuple[Path, Path]],
+    total_bytes: int,
     on_progress: ProgressCallback | None,
-) -> Archive:
-    """Add each (path, arcname) entry to a new tarball at `archive_path`.
+) -> None:
+    """Add each (path, arcname) entry to an already-open `tar`.
 
     Entries that are directories count toward neither total nor progress
     bytes (they have no content of their own), so `on_progress` only ever
     reports real file bytes.
     """
-    entries = list(entries)
-    total_bytes = sum(path.stat().st_size for path, _ in entries if path.is_file())
-    archive_path.parent.mkdir(parents=True, exist_ok=True)
     written_bytes = 0
-    with tarfile.open(archive_path, "w:gz") as tar:
-        for path, arcname in entries:
-            # recursive=False: each entry already comes from our own walk
-            # (files and folders both), so letting tar.add() recurse into a
-            # folder would add every file inside it a second time.
-            tar.add(path, arcname=arcname, recursive=False)
-            if path.is_file():
-                written_bytes += path.stat().st_size
-                if on_progress is not None:
-                    on_progress(written_bytes, total_bytes)
+    for path, arcname in entries:
+        # recursive=False: each entry already comes from our own walk (files
+        # and folders both), so letting tar.add() recurse into a folder
+        # would add every file inside it a second time.
+        tar.add(path, arcname=arcname, recursive=False)
+        if path.is_file():
+            written_bytes += path.stat().st_size
+            if on_progress is not None:
+                on_progress(written_bytes, total_bytes)
+
+
+def _write_tarball_with_pigz(
+    pigz: str,
+    entries: Sequence[tuple[Path, Path]],
+    archive_path: Path,
+    total_bytes: int,
+    on_progress: ProgressCallback | None,
+) -> None:
+    """Pipe an uncompressed tar stream through `pigz` (parallel gzip) to `archive_path`.
+
+    `tarfile` writes the uncompressed tar stream straight into the `pigz`
+    subprocess's stdin (mode "w|": no seeking, suitable for a pipe); `pigz`
+    does the gzip compression itself, in parallel across CPU cores, with
+    its stdout redirected straight to the archive file.
+    """
+    with archive_path.open("wb") as out_file:
+        process = subprocess.Popen(
+            [pigz, "-c", f"-{_GZIP_COMPRESSLEVEL}"], stdin=subprocess.PIPE, stdout=out_file
+        )
+        stdin = process.stdin
+        assert stdin is not None  # guaranteed by stdin=subprocess.PIPE above
+        try:
+            with tarfile.open(fileobj=stdin, mode="w|") as tar:
+                _add_entries(tar, entries, total_bytes, on_progress)
+        finally:
+            stdin.close()
+            return_code = process.wait()
+        if return_code != 0:
+            raise ArchiveCreationError(
+                f"pigz exited with status {return_code} while writing {archive_path}"
+            )
+
+
+def _write_tarball(
+    entries: Iterable[tuple[Path, Path]],
+    archive_path: Path,
+    on_progress: ProgressCallback | None,
+) -> Archive:
+    """Write every (path, arcname) entry into a new tarball at `archive_path`.
+
+    Prefers `pigz` for the gzip compression when it's on PATH -- it
+    parallelises across CPU cores, where the stdlib `gzip`/`zlib` codec
+    `tarfile` otherwise uses is single-threaded -- falling back to the
+    stdlib path otherwise. Either way, the result is an ordinary .tar.gz.
+    """
+    sorted_entries = list(entries)
+    total_bytes = sum(path.stat().st_size for path, _ in sorted_entries if path.is_file())
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+
+    pigz = pigz_path()
+    if pigz is not None:
+        _write_tarball_with_pigz(pigz, sorted_entries, archive_path, total_bytes, on_progress)
+    else:
+        with tarfile.open(archive_path, "w:gz", compresslevel=_GZIP_COMPRESSLEVEL) as tar:
+            _add_entries(tar, sorted_entries, total_bytes, on_progress)
 
     return _finish_archive(archive_path)
 

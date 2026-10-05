@@ -47,5 +47,9 @@ class ArchiveVerificationError(DichotomiseError):
     """Raised when an archive does not match its checksum immediately after creation."""
 
 
+class ArchiveCreationError(DichotomiseError):
+    """Raised when the external `pigz` process fails while an archive is being written."""
+
+
 class FinaliseVerificationError(DichotomiseError):
     """Raised when the finished output does not match what was expected before archiving."""

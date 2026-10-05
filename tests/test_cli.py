@@ -4,9 +4,11 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from click import unstyle
 from click.testing import CliRunner
 
+import dichotomise.cli as cli_module
 from dichotomise.cli import cli
 
 
@@ -40,6 +42,36 @@ def test_cli_runs_end_to_end_and_reports_the_archives(
     assert f"Output: {dichotomised_archives[0].parent.parent}" in result.output
     assert "Found 1 subject, 1 DICOM file" in result.output
     assert "total time" in result.output
+
+
+def test_cli_reports_when_pigz_is_found(
+    tmp_path: Path, make_dicom_file: Callable[..., Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli_module, "pigz_path", lambda: "/usr/bin/pigz")
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+
+    result = CliRunner().invoke(
+        cli, ["--source-dir", str(source), "--out-dir", str(tmp_path / "out")]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "pigz found, using it." in result.output
+
+
+def test_cli_says_nothing_about_pigz_when_it_is_not_found(
+    tmp_path: Path, make_dicom_file: Callable[..., Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli_module, "pigz_path", lambda: None)
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+
+    result = CliRunner().invoke(
+        cli, ["--source-dir", str(source), "--out-dir", str(tmp_path / "out")]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "pigz" not in result.output
 
 
 def test_cli_help_groups_required_and_optional_flags() -> None:
