@@ -53,6 +53,40 @@ def test_run_pipeline_produces_one_archive_per_subject_and_cleans_up_working_fil
     assert any(name.endswith(".dcm") for name in names)
 
 
+def test_run_pipeline_reports_subject_and_file_counts_via_on_info(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "a" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+    make_dicom_file(source / "b" / "1.dcm", PatientID="sub-02", StudyInstanceUID="study-b")
+    messages: list[str] = []
+
+    run_pipeline(source, tmp_path / "out", on_info=messages.append)
+
+    assert "Found 2 subjects, 2 DICOM files" in messages
+
+
+def test_run_pipeline_reports_archive_progress_up_to_the_total(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+    updates: list[tuple[str, int, int]] = []
+
+    def record(description: str, done: int, total: int) -> None:
+        updates.append((description, done, total))
+
+    run_pipeline(source, tmp_path / "out", on_archive_progress=record)
+
+    assert updates
+    by_description: dict[str, list[tuple[int, int]]] = {}
+    for description, done, total in updates:
+        by_description.setdefault(description, []).append((done, total))
+    for calls in by_description.values():
+        last_done, last_total = calls[-1]
+        assert last_done == last_total
+
+
 def test_run_pipeline_does_not_cross_contaminate_subjects_sharing_one_source_folder(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:

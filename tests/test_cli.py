@@ -34,6 +34,12 @@ def test_cli_runs_end_to_end_and_reports_the_archives(
     assert "Started: Study 1: archiving source DICOMs" in result.output
     assert "Completed: Study 1: creating verified archive" in result.output
     assert "Audit and archive summary" in result.output
+    assert "dichotomise v" in result.output
+    assert f"Source: {source}" in result.output
+    # Shows the actual created, timestamped run folder, not just out_dir.
+    assert f"Output: {dichotomised_archives[0].parent.parent}" in result.output
+    assert "Found 1 subject, 1 DICOM file" in result.output
+    assert "total time" in result.output
 
 
 def test_cli_help_groups_required_and_optional_flags() -> None:
@@ -64,9 +70,14 @@ def test_cli_qc_audits_in_place_without_creating_output(
     result = CliRunner().invoke(cli, ["--qc", "--source-dir", str(source)])
 
     assert result.exit_code == 0, result.output
+    assert "dichotomise v" in result.output
+    assert f"Source: {source}" in result.output
+    assert "QC Mode" in result.output
+    assert "Output:" not in result.output
     assert "DICOM inventory" in result.output
     assert "Series folder" in result.output
-    assert "QC complete; no files or folders were created." in result.output
+    assert "QC complete in" in result.output
+    assert "no files or folders were created." in result.output
     assert not out_dir.exists()
 
 

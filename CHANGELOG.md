@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.6.2
+
+- More informative CLI output: an opening banner (version, source path, and either the output directory or "QC Mode"), a subject/file count right after capture, a live "Time elapsed" ticker while a run is in progress (interactive terminals only), and a total-time summary at the end.
+- Archive creation (source, dichotomised, and review archives) now reports byte progress (`KB done/KB total`) on an interactive terminal.
+- The banner's "Output:" line now shows the actual created, timestamped run folder rather than the raw `--out-dir` argument.
+- `--keep-working-files` now warns that it keeps a full second copy of every subject's files on disk, on top of the archive.
+- Long paths in CLI output (banner, success/error messages) no longer wrap mid-path.
+
 ## v2.6.0
 
 - QC/audit tables (CLI and `stage-01-report.json`/`stage-01-audit.csv`) now sort series folders in numeric series order (e.g. `..._6_MR` before `..._29_MR`) instead of alphabetically.

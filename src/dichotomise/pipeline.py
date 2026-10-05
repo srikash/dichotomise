@@ -38,6 +38,7 @@ from dichotomise.utils.text import safe_filename_text
 _T = TypeVar("_T")
 StageCallback = Callable[[str, str, float], None]
 WarningCallback = Callable[[str], None]
+ArchiveProgressCallback = Callable[[str, int, int], None]
 
 
 def _run_stage(description: str, operation: Callable[[], _T], on_stage: StageCallback | None) -> _T:
@@ -118,9 +119,19 @@ def _final_dir_for(run: Run, subject_label: str, output_token: str) -> Path:
     return run.final_dir / f"{safe_filename_text(subject_label)}_{output_token}"
 
 
-def _archive_source_subject(subject: CapturedSubject, run: Run) -> None:
+def _archive_source_subject(
+    subject: CapturedSubject,
+    run: Run,
+    description: str,
+    on_archive_progress: ArchiveProgressCallback | None,
+) -> None:
     """Archive one captured study before it is audited or transformed."""
-    source_archive(subject, run)
+    on_progress = (
+        (lambda done, total: on_archive_progress(description, done, total))
+        if on_archive_progress is not None
+        else None
+    )
+    source_archive(subject, run, on_progress=on_progress)
 
 
 def _process_subject(
@@ -138,6 +149,7 @@ def _process_subject(
     keep_unzipped: bool,
     on_audit: Callable[[AuditResult], None] | None,
     on_stage: StageCallback | None,
+    on_archive_progress: ArchiveProgressCallback | None,
 ) -> None:
     # The replacement label depends only on `subject` and the CLI's own
     # inputs, not on anything audit/sift/rectify produce, so it can be
@@ -151,6 +163,11 @@ def _process_subject(
     output_token = _random_output_token(used_output_tokens)
     reports_dir = _reports_dir_for(run, subject_label, output_token)
     write_source_manifest(subject, reports_dir)
+
+    def _bind_progress(description: str) -> Callable[[int, int], None] | None:
+        if on_archive_progress is None:
+            return None
+        return lambda done, total: on_archive_progress(description, done, total)
 
     subject_prefix = f"Study {subject.output_number}"
     audit_result = _run_stage(f"{subject_prefix}: auditing", lambda: audit(subject), on_stage)
@@ -198,14 +215,16 @@ def _process_subject(
             on_stage,
         )
 
+    review_archive_description = f"{subject_prefix}: archiving review files"
     review_archive = _run_stage(
-        f"{subject_prefix}: archiving review files",
+        review_archive_description,
         lambda: finalise_review(
             rectify_review_result,
             run,
             subject_label=subject_label,
             archive_token=output_token,
             sanitise_review_result=sanitise_review_result,
+            on_progress=_bind_progress(review_archive_description),
         ),
         on_stage,
     )
@@ -217,14 +236,16 @@ def _process_subject(
         review_sanitised=sanitise_requested,
     )
 
+    finalise_description = f"{subject_prefix}: creating verified archive"
     finalise_result = _run_stage(
-        f"{subject_prefix}: creating verified archive",
+        finalise_description,
         lambda: finalise(
             rectify_result,
             run,
             subject_label=subject_label,
             sanitise_result=sanitise_result,
             archive_token=output_token,
+            on_progress=_bind_progress(finalise_description),
         ),
         on_stage,
     )
@@ -264,6 +285,9 @@ def run_pipeline(
     on_audit: Callable[[AuditResult], None] | None = None,
     on_stage: StageCallback | None = None,
     on_warning: WarningCallback | None = None,
+    on_info: WarningCallback | None = None,
+    on_archive_progress: ArchiveProgressCallback | None = None,
+    on_run_start: Callable[[Run], None] | None = None,
 ) -> Run:
     """Run the full dichotomise pipeline over every subject found under `source_dir`.
 
@@ -275,12 +299,24 @@ def run_pipeline(
     each subject's final (optionally sanitised) tree into `final/`,
     unarchived -- e.g. for a BIDS conversion that wants plain files on disk
     rather than a tarball.
+
+    `on_run_start`, if given, is called with the `Run` immediately once its
+    timestamped output folder exists -- before anything else -- so a caller
+    can report the actual created directory rather than the `out_dir` it
+    will be created under.
     """
     run = start_run(out_dir)
+    if on_run_start is not None:
+        on_run_start(run)
     try:
         subjects = _run_stage(
             "Capturing DICOMs by study", lambda: capture(source_dir, run), on_stage
         )
+        if on_info is not None:
+            total_files = sum(len(subject.files) for subject in subjects)
+            subject_word = "subject" if len(subjects) == 1 else "subjects"
+            file_word = "file" if total_files == 1 else "files"
+            on_info(f"Found {len(subjects)} {subject_word}, {total_files} DICOM {file_word}")
         if new_id is not None and len(subjects) != 1:
             raise RelabelError("--new-id may only be used when the source contains one subject.")
         if subject_id is not None and len(subjects) != 1 and on_warning is not None:
@@ -298,9 +334,16 @@ def run_pipeline(
         used_labels: set[str] = set()
         used_output_tokens: set[str] = set()
         for subject in subjects:
+            archive_source_description = f"Study {subject.output_number}: archiving source DICOMs"
             _run_stage(
-                f"Study {subject.output_number}: archiving source DICOMs",
-                partial(_archive_source_subject, subject, run),
+                archive_source_description,
+                partial(
+                    _archive_source_subject,
+                    subject,
+                    run,
+                    archive_source_description,
+                    on_archive_progress,
+                ),
                 on_stage,
             )
             _process_subject(
@@ -317,6 +360,7 @@ def run_pipeline(
                 keep_unzipped=keep_unzipped,
                 on_audit=on_audit,
                 on_stage=on_stage,
+                on_archive_progress=on_archive_progress,
             )
         if not keep_working_files:
             _run_stage("Cleaning working files", lambda: shutil.rmtree(run.working_dir), on_stage)

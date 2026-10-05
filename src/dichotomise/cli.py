@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _installed_version
 from pathlib import Path
-from typing import Any
+from threading import Thread
+from time import monotonic
+from typing import Any, TypeVar
 
 import rich_click as click
 import rich_click.rich_click as rich_click_config
 from rich.console import Group
+from rich.live import Live
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
@@ -21,6 +26,7 @@ from rich_click.rich_command import RichCommand
 
 from dichotomise.errors import DichotomiseError
 from dichotomise.pipeline import run_pipeline
+from dichotomise.run import Run
 from dichotomise.stages.audit import (
     AuditedFile,
     AuditResult,
@@ -29,6 +35,8 @@ from dichotomise.stages.audit import (
 )
 from dichotomise.utils.console import console, error, success
 from dichotomise.utils.text import natural_sort_key
+
+_T = TypeVar("_T")
 
 rich_click_config.OPTION_GROUPS = {
     "dichotomise": [
@@ -145,12 +153,86 @@ class DichotomiseCommand(RichCommand):
         formatter.write(Padding(content, formatter.config.padding_epilog))
 
 
+def _package_version() -> str:
+    """Return the installed dichotomise version, or "dev" outside an installed package."""
+    try:
+        return _installed_version("dichotomise")
+    except PackageNotFoundError:
+        return "dev"
+
+
+def _print_banner(source_dir: Path) -> None:
+    """Print the run's opening banner: version, then the source path.
+
+    The output line is printed separately, once it is known -- either
+    `_print_qc_mode_line()` immediately for a `--qc` run (which creates no
+    output directory), or `_print_output_line()` once `run_pipeline()`
+    reports the actual timestamped run folder it created.
+    """
+    title = f"dichotomise v{_package_version()}"
+    width = max(len(title) + 4, 45)
+    border = "%" + "-" * (width - 2) + "%"
+    console.print(f"[bold cyan]{border}[/bold cyan]")
+    console.print(f"[bold cyan]{title.center(width)}[/bold cyan]")
+    console.print(f"[bold cyan]{border}[/bold cyan]")
+    # soft_wrap: a long path must never be broken across lines, on a narrow
+    # terminal or Rich's 80-column default for non-interactive output alike.
+    console.print(f"[bold]Source:[/bold] {source_dir}", soft_wrap=True)
+
+
+def _print_qc_mode_line() -> None:
+    """Print the banner's second line for a `--qc` run, which writes nothing."""
+    console.print("[bold yellow]QC Mode[/bold yellow]")
+    console.print()
+
+
+def _print_output_line(run: Run) -> None:
+    """Print the banner's second line once the run's actual output folder exists."""
+    console.print(f"[bold]Output:[/bold] {run.root}", soft_wrap=True)
+    console.print()
+
+
 def _format_elapsed(seconds: float) -> str:
     """Format a stage duration for a concise CLI progress message."""
     if seconds < 60:
         return f"{seconds:.1f}s"
     minutes, remaining_seconds = divmod(int(seconds), 60)
     return f"{minutes}m {remaining_seconds}s"
+
+
+def _run_with_elapsed_ticker(run_started: float, work: Callable[[], _T]) -> _T:
+    """Run `work()`, showing a continuously updating "Time elapsed" line meanwhile.
+
+    Only draws the ticker on an interactive terminal -- the same reasoning
+    as `_log_archive_progress`: a redirected/CI log has no use for a line
+    that rewrites itself, and `work()` still runs normally without it.
+    `work` (here, `run_pipeline()`) does its own logging via on_stage/
+    on_info/etc. from the background thread; Rich's `Live` is built to let
+    `console.print()` calls interleave cleanly above a live-updating line.
+    """
+    if not console.is_terminal:
+        return work()
+
+    result: list[_T] = []
+    failure: list[BaseException] = []
+
+    def _target() -> None:
+        try:
+            result.append(work())
+        except BaseException as exc:  # re-raised on the calling thread below
+            failure.append(exc)
+
+    thread = Thread(target=_target)
+    thread.start()
+    with Live(console=console, refresh_per_second=4, transient=True) as live:
+        while thread.is_alive():
+            elapsed = _format_elapsed(monotonic() - run_started)
+            live.update(Text(f"Time elapsed: {elapsed}", style="dim"))
+            thread.join(timeout=0.2)
+
+    if failure:
+        raise failure[0]
+    return result[0]
 
 
 def _log_stage(status: str, description: str, elapsed_seconds: float) -> None:
@@ -169,6 +251,31 @@ def _log_warning(message: str) -> None:
     """Render a timestamped warning alongside verbose pipeline progress."""
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     console.print(f"[dim]{timestamp}[/] [yellow]Warning:[/] {message}")
+
+
+def _log_info(message: str) -> None:
+    """Render a timestamped informational note alongside verbose pipeline progress."""
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    console.print(f"[dim]{timestamp}[/] {message}")
+
+
+def _format_kb(num_bytes: int) -> str:
+    """Format a byte count as whole kilobytes, for a compact progress readout."""
+    return f"{num_bytes / 1024:,.0f}KB"
+
+
+def _log_archive_progress(description: str, done: int, total: int) -> None:
+    """Render an updating, single-line byte progress readout for one archive.
+
+    Only drawn on an interactive terminal: a redirected/CI log would just
+    accumulate every update as its own line, which is noise, not progress.
+    """
+    if not console.is_terminal or total <= 0:
+        return
+    line = f"  {description}: {_format_kb(done)}/{_format_kb(total)}"
+    end = "\n" if done >= total else ""
+    console.file.write(f"\r{line}{end}")
+    console.file.flush()
 
 
 def _audit_reasons(files: list[AuditedFile]) -> list[str]:
@@ -349,13 +456,18 @@ def _run_qc(
         raise click.UsageError(
             "--qc only accepts --source-dir and cannot be combined with processing options."
         )
-    console.print(f"[bold]dichotomise[/bold] auditing {source_dir}")
+    _print_banner(source_dir)
+    _print_qc_mode_line()
+    qc_started = monotonic()
     try:
-        _print_audit_table(audit_directory(source_dir))
+        _run_with_elapsed_ticker(
+            qc_started, lambda: _print_audit_table(audit_directory(source_dir))
+        )
     except DichotomiseError as failure:
         error(str(failure))
         raise SystemExit(1) from failure
-    success("QC complete; no files or folders were created.")
+    total_elapsed = _format_elapsed(monotonic() - qc_started)
+    success(f"QC complete in {total_elapsed}; no files or folders were created.")
 
 
 def _prepare_processing_options(
@@ -491,7 +603,11 @@ def _prepare_processing_options(
     "--keep-working-files",
     is_flag=True,
     panel="Optional flags",
-    help="Keep the copied and processed DICOM files.",
+    help=(
+        "Keep the rectified (and sanitised) DICOM files under working/, instead of "
+        "deleting them once archived. Warning: this uses a lot of disk space -- a full "
+        "second copy of every subject's files, on top of the archive."
+    ),
 )
 @click.option(
     "--keep-unzipped",
@@ -545,28 +661,41 @@ def cli(
         mapping_file,
     )
 
-    console.print(f"[bold]dichotomise[/bold] processing {source_dir}")
+    _print_banner(source_dir)
+    if keep_working_files:
+        _log_warning(
+            "--keep-working-files uses a lot of disk space: a full second copy of "
+            "every subject's files, on top of the archive."
+        )
+    run_started = monotonic()
     try:
-        run = run_pipeline(
-            source_dir,
-            out_dir,
-            sanitise_requested=options.sanitise,
-            sanitise_level=options.sanitise_policy,
-            label_mode=options.label_mode,
-            subject_id=options.subject_id,
-            new_id=options.new_id,
-            subject_mappings=options.subject_mappings,
-            keep_working_files=keep_working_files,
-            keep_unzipped=keep_unzipped,
-            on_audit=_print_audit_table,
-            on_stage=_log_stage,
-            on_warning=_log_warning,
+        run = _run_with_elapsed_ticker(
+            run_started,
+            lambda: run_pipeline(
+                source_dir,
+                out_dir,
+                sanitise_requested=options.sanitise,
+                sanitise_level=options.sanitise_policy,
+                label_mode=options.label_mode,
+                subject_id=options.subject_id,
+                new_id=options.new_id,
+                subject_mappings=options.subject_mappings,
+                keep_working_files=keep_working_files,
+                keep_unzipped=keep_unzipped,
+                on_run_start=_print_output_line,
+                on_audit=_print_audit_table,
+                on_stage=_log_stage,
+                on_warning=_log_warning,
+                on_info=_log_info,
+                on_archive_progress=_log_archive_progress,
+            ),
         )
     except DichotomiseError as failure:
         error(str(failure))
         raise SystemExit(1) from failure
 
-    success(f"Finished: {run.root}")
+    total_elapsed = _format_elapsed(monotonic() - run_started)
+    success(f"Finished: {run.root} (total time {total_elapsed})")
     _print_run_summary(run.reports_dir)
     for archive in sorted(run.archives_dir.glob("*.tar.gz")):
         console.print(f"  [green]✓[/green] {archive.name}")

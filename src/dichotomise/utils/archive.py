@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import tarfile
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from dichotomise.errors import ArchiveVerificationError
+
+ProgressCallback = Callable[[int, int], None]
 
 
 @dataclass(frozen=True)
@@ -44,24 +46,30 @@ def _finish_archive(archive_path: Path) -> Archive:
     return archive
 
 
-def make_tarball(source_dir: Path, archive_path: Path) -> Archive:
+def make_tarball(
+    source_dir: Path, archive_path: Path, *, on_progress: ProgressCallback | None = None
+) -> Archive:
     """Compress everything under `source_dir` into `archive_path`, plus a checksum file.
 
     The checksum sidecar sits next to the archive, named after it with a
-    `.sha256` extension in place of `.tar.gz`.
+    `.sha256` extension in place of `.tar.gz`. `on_progress`, if given, is
+    called after each file is added with (bytes added so far, total bytes
+    to add) -- coarse-grained (per file, not per chunk), since tarfile adds
+    a whole file in one call.
     """
-    archive_path.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive_path, "w:gz") as tar:
-        for item in sorted(source_dir.rglob("*")):
-            # recursive=False: `item` is already one entry from our own walk
-            # (files and folders both), so letting tar.add() recurse into a
-            # folder would add every file inside it a second time.
-            tar.add(item, arcname=item.relative_to(source_dir), recursive=False)
-
-    return _finish_archive(archive_path)
+    items = sorted(source_dir.rglob("*"))
+    return _write_tarball(
+        ((item, item.relative_to(source_dir)) for item in items), archive_path, on_progress
+    )
 
 
-def make_tarball_from_files(files: Sequence[Path], root: Path, archive_path: Path) -> Archive:
+def make_tarball_from_files(
+    files: Sequence[Path],
+    root: Path,
+    archive_path: Path,
+    *,
+    on_progress: ProgressCallback | None = None,
+) -> Archive:
     """Compress a scattered set of files, kept relative to `root`, into `archive_path`.
 
     Unlike `make_tarball()`, `files` need not fill all of `root` or even sit
@@ -72,10 +80,37 @@ def make_tarball_from_files(files: Sequence[Path], root: Path, archive_path: Pat
     directory, without first copying that subject's files into a folder of
     their own.
     """
+    sorted_files = sorted(files)
+    return _write_tarball(
+        ((path, path.relative_to(root)) for path in sorted_files), archive_path, on_progress
+    )
+
+
+def _write_tarball(
+    entries: Iterable[tuple[Path, Path]],
+    archive_path: Path,
+    on_progress: ProgressCallback | None,
+) -> Archive:
+    """Add each (path, arcname) entry to a new tarball at `archive_path`.
+
+    Entries that are directories count toward neither total nor progress
+    bytes (they have no content of their own), so `on_progress` only ever
+    reports real file bytes.
+    """
+    entries = list(entries)
+    total_bytes = sum(path.stat().st_size for path, _ in entries if path.is_file())
     archive_path.parent.mkdir(parents=True, exist_ok=True)
+    written_bytes = 0
     with tarfile.open(archive_path, "w:gz") as tar:
-        for path in sorted(files):
-            tar.add(path, arcname=path.relative_to(root), recursive=False)
+        for path, arcname in entries:
+            # recursive=False: each entry already comes from our own walk
+            # (files and folders both), so letting tar.add() recurse into a
+            # folder would add every file inside it a second time.
+            tar.add(path, arcname=arcname, recursive=False)
+            if path.is_file():
+                written_bytes += path.stat().st_size
+                if on_progress is not None:
+                    on_progress(written_bytes, total_bytes)
 
     return _finish_archive(archive_path)
 

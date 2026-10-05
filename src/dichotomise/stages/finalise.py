@@ -13,7 +13,7 @@ from dichotomise.run import Run
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.rectify import RectifyResult, RectifyReviewResult
 from dichotomise.stages.sanitise import SanitiseResult, SanitiseReviewResult
-from dichotomise.utils.archive import Archive, make_tarball
+from dichotomise.utils.archive import Archive, ProgressCallback, make_tarball
 from dichotomise.utils.text import safe_filename_text
 
 
@@ -98,6 +98,7 @@ def finalise(
     subject_label: str,
     sanitise_result: SanitiseResult | None = None,
     archive_token: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> FinaliseResult:
     """Verify the finished output tree, then archive it into `run.archives_dir`.
 
@@ -126,7 +127,7 @@ def finalise(
             f"_dichotomised-archive_{run.timestamp}.tar.gz"
         )
     archive_path = run.archives_dir / name
-    archive = make_tarball(source_dir, archive_path)
+    archive = make_tarball(source_dir, archive_path, on_progress=on_progress)
 
     return FinaliseResult(
         subject=subject, subject_label=subject_label, archive=archive, source_dir=source_dir
@@ -140,6 +141,7 @@ def finalise_review(
     subject_label: str,
     archive_token: str,
     sanitise_review_result: SanitiseReviewResult | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> Archive | None:
     """Archive the review tree into archives/, or None if there were no review files.
 
@@ -159,4 +161,4 @@ def finalise_review(
         f"{safe_filename_text(subject_label)}_{safe_filename_text(archive_token)}"
         f"_review-archive_{run.timestamp}.tar.gz"
     )
-    return make_tarball(source_dir, run.archives_dir / name)
+    return make_tarball(source_dir, run.archives_dir / name, on_progress=on_progress)

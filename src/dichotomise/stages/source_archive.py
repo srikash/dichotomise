@@ -12,7 +12,7 @@ from secrets import token_hex
 
 from dichotomise.run import Run
 from dichotomise.stages.capture import CapturedSubject
-from dichotomise.utils.archive import Archive, make_tarball_from_files
+from dichotomise.utils.archive import Archive, ProgressCallback, make_tarball_from_files
 from dichotomise.utils.text import safe_filename_text
 
 
@@ -28,7 +28,11 @@ def _study_archive_path(subject: CapturedSubject, run: Run) -> Path:
     raise FileExistsError(f"Could not create a unique source archive name for {subject.subject_id}")
 
 
-def source_archive(subject: CapturedSubject, run: Run) -> Archive:
+def source_archive(
+    subject: CapturedSubject, run: Run, *, on_progress: ProgressCallback | None = None
+) -> Archive:
     """Archive one subject's original source files, by their path under `source_root`."""
     paths = [metadata.path for metadata in subject.files]
-    return make_tarball_from_files(paths, subject.source_root, _study_archive_path(subject, run))
+    return make_tarball_from_files(
+        paths, subject.source_root, _study_archive_path(subject, run), on_progress=on_progress
+    )
