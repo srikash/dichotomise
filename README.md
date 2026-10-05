@@ -1,4 +1,4 @@
-# dichotomise [![Version](https://img.shields.io/badge/version-2.5.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.5.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml)
+# dichotomise [![Version](https://img.shields.io/badge/version-2.6.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.6.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml)
 <b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
 de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
 
@@ -140,23 +140,29 @@ outside a fragile folder hierarchy.
 
 One command runs the full pipeline, in order:
 
-1. **capture** — copies readable DICOM files into a working folder, grouping files
-   by `(PatientID, StudyInstanceUID)` from their own headers, never from
-   folder names.
-2. **source_archive** — archives each captured study's untouched DICOM files
-   with a checksum before further processing.
+1. **capture** — groups the source directory's DICOM files by
+   `(PatientID, StudyInstanceUID)` from their own headers, never from folder
+   names. Nothing is copied yet; every file stays exactly where the export
+   left it.
+2. **source_archive** — archives each subject's untouched DICOM files,
+   straight from the source directory, with a checksum — before anything
+   else is read from or written to them, so a later copy can never silently
+   diverge from what this archive preserves.
 3. **audit** — flags duplicate scan content (by comparing everything except
    each file's own unique ID), files sitting in the wrong series folder, and
    inconsistent patient, study, or series metadata within a physical DICOM
    folder. The CLI prints a Rich inventory table, and the reports include a
    spreadsheet-friendly CSV.
-4. **sift** — splits files into `retained` and `review`, physically, before
+4. **sift** — splits files into `retained` and `review`, logically, before
    the final archive is ever built, so a flagged file is never silently
-   included in the archive you share. There is no need to delete and
-   re-export a whole series to exclude one bad file — `sift` already excludes
-   it, and the untouched `source/` archive remains the reference if you ever
-   need the original file back.
-5. **rectify** — copies retained files into a sorted, clearly named tree:
+   included in the archive you share. This is a classification step only
+   (no files move yet); there is no need to delete and re-export a whole
+   series to exclude one bad file — `sift` already excludes it, and the
+   untouched source archive (in `archives/`) remains the reference if you
+   ever need the original file back.
+5. **rectify** — the pipeline's one copy of each file's bytes: it reads
+   retained files straight from the source directory and writes them into a
+   sorted, clearly named tree:
    `<series number>-<series description>/<series>_<series ID>_<instance>_e<echo>.dcm`.
    Review files are renamed the same way (surfacing what a misfiled or
    duplicate file's own metadata claims, even when that metadata is wrong),
@@ -220,10 +226,10 @@ installing Python packages directly isn't an option.
 
 ```bash
 # Docker
-docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.5.0 --help
+docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.6.0 --help
 
 # Apptainer / Singularity
-apptainer run oras://ghcr.io/srikash/dichotomise:2.5.0-sif --help
+apptainer run oras://ghcr.io/srikash/dichotomise:2.6.0-sif --help
 ```
 
 Mount your source and output directories under `/data` (the image's working
@@ -243,7 +249,7 @@ since it delegates straight into the containerized CLI), auto-detects
 ```
 
 Set `DICHOTOMISE_ENGINE=docker|apptainer` to force an engine, and
-`DICHOTOMISE_VERSION=2.5.0` (default `latest`) to pin a release.
+`DICHOTOMISE_VERSION=2.6.0` (default `latest`) to pin a release.
 
 ## Usage
 
@@ -276,7 +282,8 @@ folder names do not need to be sensible.
 | `--random-name` | Generate a random replacement name using the `minimal` sanitisation policy. |
 | `--mapping` | One or more `PatientID:replacement_id` pairs. Repeat the flag or separate pairs with commas. The PatientID must exactly match the DICOM `PatientID`. |
 | `--mapping-file` | JSON object mapping DICOM PatientID to replacement ID, for example `{"source-01": "sub-0001"}`. A full path may be given with or without the `.json` suffix. |
-| `--keep-working-files` | Keep the copied and processed DICOM files (`working/`) instead of deleting them once the archives are verified. |
+| `--keep-working-files` | Keep the processed DICOM files written during rectify/sanitise (`working/`) instead of deleting them once the archives are verified. |
+| `--keep-unzipped` | Also keep each study's final (optionally sanitised) files unarchived, in `final/` — independent of `--keep-working-files` — for a later BIDS conversion or other tooling that wants plain files rather than a tarball. |
 
 For one study, use `--subj-id`, `--random-name`, or `--new-id`. For several
 studies, use `--subj-id` (automatic enumeration), `--random-name`, `--mapping`,
@@ -293,15 +300,16 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 
 ```text
 <run-timestamp>_dichotomise_outputs/
-  source/
+  archives/
     <patient-id>_<6char-hex>_source-archive_<run-timestamp>.tar.gz
     <patient-id>_<6char-hex>_source-archive_<run-timestamp>.sha256
-  archives/
     <subject-label>_<6char-hex>_dichotomised-archive_<run-timestamp>.tar.gz
     <subject-label>_<6char-hex>_dichotomised-archive_<run-timestamp>.sha256
     <subject-label>_<6char-hex>_review-archive_<run-timestamp>.tar.gz        # only if review files exist
     <subject-label>_<6char-hex>_review-archive_<run-timestamp>.sha256       # only if review files exist
   working/                   # temporary, removed unless --keep-working-files
+  final/                      # only with --keep-unzipped
+    <subject-label>_<6char-hex>/   # the same tree that archives/*_dichotomised-archive.tar.gz holds, unarchived
   reports/
     <subject-label>_<6char-hex>/
       stage-01-report.json
@@ -317,11 +325,11 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
 `run-status.json` lets you distinguish a complete result from one left by a
 failed or interrupted run. It contains no patient details.
 
-A multi-subject run produces one `source/` archive and one `archives/` archive
-per study. Each source archive name uses the original patient ID plus a random
-six-character hexadecimal suffix. The source archive contains untouched DICOM
-files and their original headers, including patient identity; use the
-sanitised `archives/` output for sharing.
+A multi-subject run produces one source archive and one dichotomised archive
+per study, both under `archives/`. Each source archive name uses the original
+patient ID plus a random six-character hexadecimal suffix. The source archive
+contains untouched DICOM files and their original headers, including patient
+identity; use the sanitised dichotomised archive for sharing.
 
 Processed archive and report names use the study's `<subject-label>` plus a
 random six-character hexadecimal suffix. `<subject-label>` is the real
@@ -417,14 +425,14 @@ gitignored and never committed — it may contain identifying information.
 
 ```mermaid
 flowchart TD
-    SOURCE["Raw scanner export"] --> CAPTURE["capture<br/>Copies readable DICOM into working/"]
-    CAPTURE --> ARCHIVE["source_archive<br/>Per-study verified tarball + checksum (source/)"]
+    SOURCE["Raw scanner export"] --> CAPTURE["capture<br/>Groups DICOM by subject, in place"]
+    CAPTURE --> ARCHIVE["source_archive<br/>Per-study verified tarball + checksum (archives/), straight from the source files"]
     ARCHIVE --> AUDIT["audit<br/>Structural and metadata QA per subject"]
     AUDIT --> REPORT1["stage-01-report.json<br/>stage-01-audit.csv"]
-    AUDIT --> SIFT["sift<br/>Splits retained vs review files"]
+    AUDIT --> SIFT["sift<br/>Splits retained vs review, logically"]
     SIFT --> REPORT2["stage-02-report.json"]
-    SIFT --> RECTIFY["rectify<br/>Metadata-sorted, renamed DICOM tree"]
-    SIFT --> REVIEW_RECTIFY["rectify_review<br/>Renames review files the same way"]
+    SIFT --> RECTIFY["rectify<br/>Copies retained files into a metadata-sorted, renamed DICOM tree"]
+    SIFT --> REVIEW_RECTIFY["rectify_review<br/>Copies and renames review files the same way"]
     RECTIFY --> SANITISE["sanitise (optional, --sanitise)<br/>Replaces patient identity per policy"]
     REVIEW_RECTIFY --> SANITISE_REVIEW["sanitise_review (optional, --sanitise)<br/>Same policy, shared replacement identifiers"]
     RECTIFY --> FINALISE["finalise<br/>Re-verifies output, archives it (archives/)"]

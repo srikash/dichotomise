@@ -22,14 +22,16 @@ from dichotomise.stages.sift import ReviewFile, SiftResult
 from dichotomise.utils.archive import Archive
 
 
-def _subject(directory: Path) -> CapturedSubject:
+def _subject(source_root: Path, files: list[DicomMetadata] | None = None) -> CapturedSubject:
     return CapturedSubject(
         subject_id="sub-01",
         patient_name="Doe^Jane^19900101",
         study_instance_uid="study-a",
         scan_date="20260101",
         scan_time="120000",
-        directory=directory,
+        files=files or [],
+        source_root=source_root,
+        working_dir=source_root,
     )
 
 
@@ -120,18 +122,46 @@ def test_write_audit_report_flags_metadata_inconsistencies_within_a_series(
     assert row["metadata_inconsistencies"] == "PatientName"
 
 
-def test_write_sift_report_records_retained_and_review_counts(tmp_path: Path) -> None:
+def test_write_audit_report_orders_series_numerically_not_alphabetically(tmp_path: Path) -> None:
     capture_dir = tmp_path / "capture"
-    subject = _subject(capture_dir)
-    retained_dir = tmp_path / "sift" / "retained"
-    review_dir = tmp_path / "sift" / "review"
-    review_path = review_dir / "021-DWI" / "2.dcm"
+    folders = ["export_2_MR", "export_6_MR", "export_29_MR", "export_100_MR"]
+    audit_result = AuditResult(
+        subject=_subject(capture_dir),
+        files=[
+            AuditedFile(
+                _metadata(capture_dir / folder / "1.dcm"), is_duplicate=False, is_misfiled=False
+            )
+            for folder in folders
+        ],
+    )
+
+    report_path = write_audit_report(audit_result, tmp_path / "reports", subject_label="sub-01")
+
+    data = json.loads(report_path.read_text())
+    assert [row["series_folder"] for row in data["series"]] == [
+        "export_2_MR",
+        "export_6_MR",
+        "export_29_MR",
+        "export_100_MR",
+    ]
+    with (report_path.parent / "stage-01-audit.csv").open(newline="") as report_file:
+        rows = list(csv.DictReader(report_file))
+    assert [row["series_folder"] for row in rows] == [
+        "export_2_MR",
+        "export_6_MR",
+        "export_29_MR",
+        "export_100_MR",
+    ]
+
+
+def test_write_sift_report_records_retained_and_review_counts(tmp_path: Path) -> None:
+    source_dir = tmp_path / "export"
+    subject = _subject(source_dir)
+    review_path = source_dir / "021-DWI" / "2.dcm"
     sift_result = SiftResult(
         subject=subject,
-        retained=[_metadata(retained_dir / "021-DWI" / "1.dcm")],
-        retained_dir=retained_dir,
+        retained=[_metadata(source_dir / "021-DWI" / "1.dcm")],
         review=[ReviewFile(_metadata(review_path), "duplicate")],
-        review_dir=review_dir,
     )
     reports_dir = tmp_path / "reports" / "sub-01_20260101-120000"
 
@@ -150,15 +180,8 @@ def test_write_sift_report_records_retained_and_review_counts(tmp_path: Path) ->
 
 
 def test_write_sift_report_records_review_archive_details_when_present(tmp_path: Path) -> None:
-    capture_dir = tmp_path / "capture"
-    subject = _subject(capture_dir)
-    sift_result = SiftResult(
-        subject=subject,
-        retained=[],
-        retained_dir=tmp_path / "sift" / "retained",
-        review=[],
-        review_dir=tmp_path / "sift" / "review",
-    )
+    subject = _subject(tmp_path / "export")
+    sift_result = SiftResult(subject=subject, retained=[], review=[])
     rectify_review_result = RectifyReviewResult(
         review_rectified_dir=tmp_path / "review-rectify", files=[], collision_count=2
     )
@@ -185,11 +208,11 @@ def test_write_sift_report_records_review_archive_details_when_present(tmp_path:
 
 
 def test_write_source_manifest_lists_every_captured_file(tmp_path: Path) -> None:
-    capture_dir = tmp_path / "capture"
-    file_a = capture_dir / "021-DWI" / "1.dcm"
+    source_dir = tmp_path / "export"
+    file_a = source_dir / "021-DWI" / "1.dcm"
     file_a.parent.mkdir(parents=True)
     file_a.write_bytes(b"hello")
-    subject = _subject(capture_dir)
+    subject = _subject(source_dir, files=[_metadata(file_a)])
 
     manifest_path = write_source_manifest(subject, tmp_path / "reports")
 
@@ -204,16 +227,14 @@ def test_write_source_manifest_lists_every_captured_file(tmp_path: Path) -> None
 
 
 def test_write_retained_manifest_lists_retained_files(tmp_path: Path) -> None:
-    retained_dir = tmp_path / "sift" / "retained"
-    file_a = retained_dir / "021-DWI" / "1.dcm"
+    source_dir = tmp_path / "export"
+    file_a = source_dir / "021-DWI" / "1.dcm"
     file_a.parent.mkdir(parents=True)
     file_a.write_bytes(b"retained")
     sift_result = SiftResult(
-        subject=_subject(tmp_path / "capture"),
+        subject=_subject(source_dir),
         retained=[_metadata(file_a)],
-        retained_dir=retained_dir,
         review=[],
-        review_dir=tmp_path / "sift" / "review",
     )
 
     manifest_path = write_retained_manifest(sift_result, tmp_path / "reports")
@@ -231,29 +252,21 @@ def test_write_retained_manifest_lists_retained_files(tmp_path: Path) -> None:
 
 
 def test_write_review_manifest_returns_none_when_review_is_empty(tmp_path: Path) -> None:
-    sift_result = SiftResult(
-        subject=_subject(tmp_path / "capture"),
-        retained=[],
-        retained_dir=tmp_path / "sift" / "retained",
-        review=[],
-        review_dir=tmp_path / "sift" / "review",
-    )
+    sift_result = SiftResult(subject=_subject(tmp_path / "export"), retained=[], review=[])
 
     assert write_review_manifest(sift_result, tmp_path / "reports") is None
     assert not (tmp_path / "reports" / "review-manifest.csv").exists()
 
 
 def test_write_review_manifest_lists_review_files(tmp_path: Path) -> None:
-    review_dir = tmp_path / "sift" / "review"
-    file_a = review_dir / "021-DWI" / "2.dcm"
+    source_dir = tmp_path / "export"
+    file_a = source_dir / "021-DWI" / "2.dcm"
     file_a.parent.mkdir(parents=True)
     file_a.write_bytes(b"review file")
     sift_result = SiftResult(
-        subject=_subject(tmp_path / "capture"),
+        subject=_subject(source_dir),
         retained=[],
-        retained_dir=tmp_path / "sift" / "retained",
         review=[ReviewFile(_metadata(file_a), "duplicate")],
-        review_dir=review_dir,
     )
 
     manifest_path = write_review_manifest(sift_result, tmp_path / "reports")
@@ -277,6 +290,7 @@ def test_write_finalise_report_records_the_archive_and_sanitise_state(tmp_path: 
         subject=subject,
         subject_label="sub-0005",
         archive=Archive(path=archive_path, checksum_path=checksum_path),
+        source_dir=capture_dir,
     )
     reports_dir = tmp_path / "reports" / "sub-0005_20260101-120000"
 
@@ -322,6 +336,7 @@ def test_write_finalise_report_includes_first_dicom_names_for_each_series(tmp_pa
         subject=subject,
         subject_label="sub-01",
         archive=Archive(path=archive_path, checksum_path=checksum_path),
+        source_dir=rectified_dir,
     )
 
     report_path = write_finalise_report(

@@ -40,8 +40,8 @@ def test_pipeline_runs_end_to_end_on_a_slice_of_real_scanner_data(tmp_path: Path
 
     run = run_pipeline(source, tmp_path / "out")
 
-    archives = list(run.archives_dir.glob("*.tar.gz"))
-    checksums = list(run.archives_dir.glob("*.sha256"))
+    archives = list(run.archives_dir.glob("*_dichotomised-archive_*.tar.gz"))
+    checksums = list(run.archives_dir.glob("*_dichotomised-archive_*.sha256"))
     assert len(archives) == 1
     assert len(checksums) == 1
     assert verify_archive(archives[0], checksums[0]) is True
@@ -54,6 +54,6 @@ def test_pipeline_sanitises_real_scanner_data_without_error(tmp_path: Path) -> N
         source, tmp_path / "out", sanitise_requested=True, label_mode="numerical", subject_id="1"
     )
 
-    archives = list(run.archives_dir.glob("*.tar.gz"))
+    archives = list(run.archives_dir.glob("*_dichotomised-archive_*.tar.gz"))
     assert len(archives) == 1
     assert "sub-0001" in archives[0].name

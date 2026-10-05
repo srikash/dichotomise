@@ -35,7 +35,7 @@ def sanitise(
     `replacement_cache` to also share it with `sanitise_review()`, so a UID
     common to a retained and a review file still gets the same replacement.
     """
-    sanitised_dir = rectify_result.subject.directory.parent / "sanitise"
+    sanitised_dir = rectify_result.subject.working_dir / "sanitise"
     replacement_cache = {} if replacement_cache is None else replacement_cache
     files: list[Path] = []
 

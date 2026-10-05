@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.6.0
+
+- QC/audit tables (CLI and `stage-01-report.json`/`stage-01-audit.csv`) now sort series folders in numeric series order (e.g. `..._6_MR` before `..._29_MR`) instead of alphabetically.
+- Cut redundant DICOM copying: `capture()` no longer copies files into a working tree, and `sift()` is now a logical split — rectify() is the pipeline's one real copy of each file's bytes, reading straight from the original source.
+- `source_archive()` now archives each subject's files straight from the original source directory, before anything else touches them, rather than from a working copy.
+- `archives/` now holds the source archive alongside the dichotomised and review archives (previously a separate `source/` folder).
+- New `--keep-unzipped` flag: in addition to the always-created archive, also writes each study's final (optionally sanitised) files unarchived, into `final/` — e.g. for a later BIDS conversion.
+
 ## v2.5.0
 
 - Published Docker and Apptainer/Singularity images to GHCR on every release, alongside PyPI.

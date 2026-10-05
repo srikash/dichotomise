@@ -22,12 +22,14 @@ class Run:
         return self.root / "working"
 
     @property
-    def source_archive_dir(self) -> Path:
-        return self.root / "source"
+    def archives_dir(self) -> Path:
+        """Where every archive lives: source, dichotomised, and review."""
+        return self.root / "archives"
 
     @property
-    def archives_dir(self) -> Path:
-        return self.root / "archives"
+    def final_dir(self) -> Path:
+        """Where --keep-unzipped writes each subject's final tree, unarchived."""
+        return self.root / "final"
 
     @property
     def reports_dir(self) -> Path:

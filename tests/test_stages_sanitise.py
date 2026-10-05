@@ -11,14 +11,16 @@ from dichotomise.stages.rectify import RectifyResult, RectifyReviewResult
 from dichotomise.stages.sanitise import sanitise, sanitise_review
 
 
-def _subject(directory: Path) -> CapturedSubject:
+def _subject(working_dir: Path) -> CapturedSubject:
     return CapturedSubject(
         subject_id="sub-01",
         patient_name="Doe^Jane^19900101",
         study_instance_uid="study-a",
         scan_date="20260101",
         scan_time="120000",
-        directory=directory,
+        files=[],
+        source_root=working_dir,
+        working_dir=working_dir,
     )
 
 

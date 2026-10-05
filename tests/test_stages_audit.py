@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from dichotomise.pydcm.read import iter_dicom_metadata
 from dichotomise.stages.audit import audit, audit_directory
 from dichotomise.stages.capture import CapturedSubject
 
@@ -14,7 +15,9 @@ def _subject(directory: Path) -> CapturedSubject:
         study_instance_uid="study-a",
         scan_date="20260101",
         scan_time="120000",
-        directory=directory,
+        files=list(iter_dicom_metadata(directory)),
+        source_root=directory,
+        working_dir=directory,
     )
 
 
@@ -92,6 +95,6 @@ def test_audit_directory_checks_source_files_in_place(
 
     result = audit_directory(source_dir)
 
-    assert result.subject.directory == source_dir
+    assert result.subject.source_root == source_dir
     assert [file.metadata.path for file in result.files] == [dicom_file]
     assert list(source_dir.rglob("*")) == [source_dir / "series", dicom_file]

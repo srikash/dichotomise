@@ -20,9 +20,14 @@ def test_cli_runs_end_to_end_and_reports_the_archives(
     result = CliRunner().invoke(cli, ["--source-dir", str(source), "--out-dir", str(out_dir)])
 
     assert result.exit_code == 0, result.output
+    # archives/ holds both the source archive and the dichotomised archive.
     archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
-    assert len(archives) == 1
-    assert archives[0].name in result.output
+    assert len(archives) == 2
+    dichotomised_archives = [a for a in archives if "_dichotomised-archive_" in a.name]
+    source_archives = [a for a in archives if "_source-archive_" in a.name]
+    assert len(dichotomised_archives) == 1
+    assert len(source_archives) == 1
+    assert dichotomised_archives[0].name in result.output
     assert "DICOM inventory" in result.output
     assert "Series folder" in result.output
     assert "Pass" in result.output
@@ -77,6 +82,36 @@ def test_cli_qc_rejects_an_output_directory(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "--qc only accepts --source-dir" in unstyle(result.output)
+
+
+def test_cli_qc_rejects_keep_unzipped(tmp_path: Path) -> None:
+    source = tmp_path / "export"
+    source.mkdir()
+
+    result = CliRunner().invoke(
+        cli, ["--qc", "--source-dir", str(source), "--keep-unzipped"], env={"FORCE_COLOR": "1"}
+    )
+
+    assert result.exit_code != 0
+    assert "--qc only accepts --source-dir" in unstyle(result.output)
+
+
+def test_cli_keep_unzipped_writes_the_final_tree_alongside_the_archive(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+    out_dir = tmp_path / "out"
+
+    result = CliRunner().invoke(
+        cli, ["--source-dir", str(source), "--out-dir", str(out_dir), "--keep-unzipped"]
+    )
+
+    assert result.exit_code == 0, result.output
+    run_dir = next(out_dir.glob("*_dichotomise_outputs"))
+    unzipped = list(run_dir.glob("final/*/**/*.dcm"))
+    assert len(unzipped) == 1
+    assert not run_dir.joinpath("working").exists()
 
 
 def test_cli_requires_output_directory_outside_qc(tmp_path: Path) -> None:
@@ -138,7 +173,7 @@ def test_cli_sanitise_infers_numerical_mode_from_subject_id(
     )
 
     assert result.exit_code == 0, result.output
-    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*_dichotomised-archive_*.tar.gz"))
     assert "sub-0005" in archives[0].name
 
 
@@ -163,7 +198,7 @@ def test_cli_new_id_adds_the_sub_prefix(
     )
 
     assert result.exit_code == 0, result.output
-    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*_dichotomised-archive_*.tar.gz"))
     assert archives[0].name.startswith("sub-ADNC0751_")
 
 
@@ -219,7 +254,7 @@ def test_cli_loads_a_json_mapping_file_when_its_extension_is_omitted(
     )
 
     assert result.exit_code == 0, result.output
-    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*_dichotomised-archive_*.tar.gz"))
     assert archives[0].name.startswith("sub-0042_")
 
 
@@ -326,7 +361,7 @@ def test_cli_random_name_implies_sanitise_with_the_minimal_policy(
     )
 
     assert result.exit_code == 0, result.output
-    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*.tar.gz"))
+    archives = list(out_dir.glob("*_dichotomise_outputs/archives/*_dichotomised-archive_*.tar.gz"))
     assert len(archives) == 1
     # --sanitise wasn't passed explicitly, but --random-name implies it.
     assert "sub-01" not in archives[0].name

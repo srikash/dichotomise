@@ -23,8 +23,8 @@ def test_run_exposes_the_agreed_output_subdirectories(tmp_path: Path) -> None:
     run = start_run(tmp_path, now=datetime(2026, 9, 22, 14, 30, 12, tzinfo=UTC))
 
     assert run.working_dir == run.root / "working"
-    assert run.source_archive_dir == run.root / "source"
     assert run.archives_dir == run.root / "archives"
+    assert run.final_dir == run.root / "final"
     assert run.reports_dir == run.root / "reports"
 
 

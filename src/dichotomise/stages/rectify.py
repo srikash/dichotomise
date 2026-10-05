@@ -1,4 +1,9 @@
-"""Stage 5: copy retained files into metadata-named, series-ordered folders."""
+"""Stage 5: copy retained files into metadata-named, series-ordered folders.
+
+This is the pipeline's first and only copy of each file's bytes: capture()
+and sift() work from the original source files in place, so rectify() (and
+rectify_review() below) read straight from those original paths.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +36,7 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
     already removed genuine duplicates), so it stops the run rather than
     silently picking one or numbering around it.
     """
-    rectified_dir = sift_result.subject.directory.parent / "rectify"
+    rectified_dir = sift_result.subject.working_dir / "rectify"
     occupied: dict[Path, DicomMetadata] = {}
     files: list[DicomMetadata] = []
 
@@ -71,7 +76,7 @@ def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
     the colliding file keeps a disambiguated name (`-dup01`, `-dup02`, ...)
     instead of being silently dropped or overwritten.
     """
-    review_rectified_dir = sift_result.subject.directory.parent / "review-rectify"
+    review_rectified_dir = sift_result.subject.working_dir / "review-rectify"
     occupied: dict[Path, int] = {}
     files: list[DicomMetadata] = []
     collision_count = 0

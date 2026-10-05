@@ -20,6 +20,7 @@ from dichotomise.stages.rectify import RectifyResult, RectifyReviewResult
 from dichotomise.stages.sanitise import SanitiseResult
 from dichotomise.stages.sift import SiftResult
 from dichotomise.utils.archive import Archive
+from dichotomise.utils.text import natural_sort_key
 
 
 def _relative(path: Path, base: Path) -> str:
@@ -40,7 +41,9 @@ def _audit_series_rows(audit_result: AuditResult) -> list[dict[str, str | int]]:
         files_by_folder.setdefault(audited_file.metadata.path.parent, []).append(audited_file)
 
     rows: list[dict[str, str | int]] = []
-    for folder, files in sorted(files_by_folder.items()):
+    for folder, files in sorted(
+        files_by_folder.items(), key=lambda item: (natural_sort_key(item[0].name), item[0])
+    ):
         inconsistencies = metadata_inconsistencies(files)
         duplicate_count = sum(file.is_duplicate for file in files)
         misfiled_count = sum(file.is_misfiled for file in files)
@@ -89,10 +92,12 @@ def write_audit_report(audit_result: AuditResult, reports_dir: Path, *, subject_
     """
     series_rows = _audit_series_rows(audit_result)
     duplicates = sorted(
-        {file.metadata.path.parent.name for file in audit_result.files if file.is_duplicate}
+        {file.metadata.path.parent.name for file in audit_result.files if file.is_duplicate},
+        key=natural_sort_key,
     )
     misfiled = sorted(
-        {file.metadata.path.parent.name for file in audit_result.files if file.is_misfiled}
+        {file.metadata.path.parent.name for file in audit_result.files if file.is_misfiled},
+        key=natural_sort_key,
     )
     data = {
         "stage": "audit",
@@ -122,7 +127,10 @@ def write_sift_report(
 ) -> Path:
     """Write stage-02-report.json: what was retained versus sent for review."""
     review = [
-        {"file": _relative(item.metadata.path, sift_result.review_dir), "reason": item.reason}
+        {
+            "file": _relative(item.metadata.path, sift_result.subject.source_root),
+            "reason": item.reason,
+        }
         for item in sift_result.review
     ]
     data = {
@@ -173,15 +181,15 @@ def _write_manifest_csv(files: list[Path], root: Path, manifest_path: Path) -> P
 
 def write_source_manifest(subject: CapturedSubject, reports_dir: Path) -> Path:
     """Write source-manifest.csv: every captured source file, size and timestamps."""
-    files = sorted(p for p in subject.directory.rglob("*") if p.is_file())
-    return _write_manifest_csv(files, subject.directory, reports_dir / "source-manifest.csv")
+    files = sorted(metadata.path for metadata in subject.files)
+    return _write_manifest_csv(files, subject.source_root, reports_dir / "source-manifest.csv")
 
 
 def write_retained_manifest(sift_result: SiftResult, reports_dir: Path) -> Path:
     """Write retained-manifest.csv: every file that passed sift, size and timestamps."""
     files = [item.path for item in sift_result.retained]
     return _write_manifest_csv(
-        files, sift_result.retained_dir, reports_dir / "retained-manifest.csv"
+        files, sift_result.subject.source_root, reports_dir / "retained-manifest.csv"
     )
 
 
@@ -190,7 +198,9 @@ def write_review_manifest(sift_result: SiftResult, reports_dir: Path) -> Path | 
     if not sift_result.review:
         return None
     files = [item.metadata.path for item in sift_result.review]
-    return _write_manifest_csv(files, sift_result.review_dir, reports_dir / "review-manifest.csv")
+    return _write_manifest_csv(
+        files, sift_result.subject.source_root, reports_dir / "review-manifest.csv"
+    )
 
 
 def _series_inventory(

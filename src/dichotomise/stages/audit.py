@@ -1,4 +1,4 @@
-"""Stage 3: structural QA over captured DICOM files (duplicates, misfiled series)."""
+"""Stage 3: structural QA over the subject's DICOM files (duplicates, misfiled series)."""
 
 from __future__ import annotations
 
@@ -54,41 +54,49 @@ def metadata_inconsistencies(files: Sequence[AuditedFile]) -> list[str]:
 def audit(subject: CapturedSubject) -> AuditResult:
     """Check a captured subject's files for duplicates and files in the wrong folder.
 
+    Runs against `subject.files` as capture() found them in place -- no
+    directory is re-scanned here.
+
     Both checks are computed per physical folder: a folder's own files
     decide, by majority, what series that folder is supposed to contain
     (see pydcm.identify.find_misfiled_files), and duplicate content is only
     compared between files that already sit in the same folder.
     """
-    return _audit_directory(subject.directory, subject)
+    return _audit_files(subject.files, subject)
 
 
 def audit_directory(directory: Path) -> AuditResult:
     """Audit DICOMs in place without creating a pipeline run or copying files."""
+    files = list(iter_dicom_metadata(directory))
+    if not files:
+        raise NoDicomFilesFoundError(f"No DICOM files were found under {directory}")
     subject = CapturedSubject(
         subject_id="QC",
         patient_name="",
         study_instance_uid="",
         scan_date="",
         scan_time="",
-        directory=directory,
+        files=files,
+        source_root=directory,
+        working_dir=directory,  # unused: QC mode never writes, so there's nothing to anchor
     )
-    return _audit_directory(directory, subject)
+    return _audit_files(files, subject)
 
 
-def _audit_directory(directory: Path, subject: CapturedSubject) -> AuditResult:
-    """Compute audit findings for DICOMs under one directory."""
+def _audit_files(files: Sequence[DicomMetadata], subject: CapturedSubject) -> AuditResult:
+    """Compute audit findings for a subject's DICOM files, wherever they sit on disk."""
     files_by_folder: dict[Path, list[Path]] = defaultdict(list)
     metadata_by_folder: dict[str, list[DicomMetadata]] = defaultdict(list)
     metadata_by_path: dict[Path, DicomMetadata] = {}
 
-    for metadata in iter_dicom_metadata(directory):
+    for metadata in files:
         path = metadata.path
         metadata_by_path[path] = metadata
         files_by_folder[path.parent].append(path)
         metadata_by_folder[str(path.parent)].append(metadata)
 
     if not metadata_by_path:
-        raise NoDicomFilesFoundError(f"No DICOM files were found under {directory}")
+        raise NoDicomFilesFoundError(f"No DICOM files were found for subject {subject.subject_id}")
 
     duplicates: set[Path] = set()
     for paths in files_by_folder.values():
@@ -96,7 +104,7 @@ def _audit_directory(directory: Path, subject: CapturedSubject) -> AuditResult:
 
     misfiled = find_misfiled_files(metadata_by_folder)
 
-    files = [
+    audited_files = [
         AuditedFile(
             metadata=metadata,
             is_duplicate=path in duplicates,
@@ -104,4 +112,4 @@ def _audit_directory(directory: Path, subject: CapturedSubject) -> AuditResult:
         )
         for path, metadata in sorted(metadata_by_path.items())
     ]
-    return AuditResult(subject=subject, files=files)
+    return AuditResult(subject=subject, files=audited_files)

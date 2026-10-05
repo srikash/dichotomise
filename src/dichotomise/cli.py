@@ -28,6 +28,7 @@ from dichotomise.stages.audit import (
     metadata_inconsistencies,
 )
 from dichotomise.utils.console import console, error, success
+from dichotomise.utils.text import natural_sort_key
 
 rich_click_config.OPTION_GROUPS = {
     "dichotomise": [
@@ -57,6 +58,7 @@ rich_click_config.OPTION_GROUPS = {
                 "--mapping",
                 "--mapping-file",
                 "--keep-working-files",
+                "--keep-unzipped",
                 "--help",
             ],
             "title_style": "bold",
@@ -201,7 +203,9 @@ def _print_audit_table(audit_result: AuditResult) -> None:
     table.add_column("Modified")
     table.add_column("Check")
     table.add_column("Why", overflow="fold")
-    for folder, files in sorted(files_by_folder.items()):
+    for folder, files in sorted(
+        files_by_folder.items(), key=lambda item: (natural_sort_key(item[0].name), item[0])
+    ):
         reasons = _audit_reasons(files)
         table.add_row(
             folder.name,
@@ -326,6 +330,7 @@ def _run_qc(
     mapping: tuple[str, ...],
     mapping_file: Path | None,
     keep_working_files: bool,
+    keep_unzipped: bool,
 ) -> None:
     """Print an in-place audit after ensuring no processing option was selected."""
     incompatible_options = (
@@ -338,6 +343,7 @@ def _run_qc(
         bool(mapping),
         mapping_file is not None,
         keep_working_files,
+        keep_unzipped,
     )
     if any(incompatible_options):
         raise click.UsageError(
@@ -487,6 +493,15 @@ def _prepare_processing_options(
     panel="Optional flags",
     help="Keep the copied and processed DICOM files.",
 )
+@click.option(
+    "--keep-unzipped",
+    is_flag=True,
+    panel="Optional flags",
+    help=(
+        "Also keep each study's final (optionally sanitised) files unarchived, in "
+        "final/ -- e.g. for a later BIDS conversion that wants plain files, not a tarball."
+    ),
+)
 def cli(
     source_dir: Path,
     out_dir: Path | None,
@@ -499,6 +514,7 @@ def cli(
     mapping: tuple[str, ...],
     mapping_file: Path | None,
     keep_working_files: bool,
+    keep_unzipped: bool,
 ) -> None:
     """Run the standard, end-to-end dichotomise pipeline."""
     if qc:
@@ -513,6 +529,7 @@ def cli(
             mapping,
             mapping_file,
             keep_working_files,
+            keep_unzipped,
         )
         return
 
@@ -540,6 +557,7 @@ def cli(
             new_id=options.new_id,
             subject_mappings=options.subject_mappings,
             keep_working_files=keep_working_files,
+            keep_unzipped=keep_unzipped,
             on_audit=_print_audit_table,
             on_stage=_log_stage,
             on_warning=_log_warning,

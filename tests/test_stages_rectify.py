@@ -32,35 +32,35 @@ def _metadata(path: Path, **overrides: object) -> DicomMetadata:
     return DicomMetadata(**defaults)  # type: ignore[arg-type]
 
 
-def _subject(directory: Path) -> CapturedSubject:
+def _subject(working_dir: Path, source_root: Path) -> CapturedSubject:
     return CapturedSubject(
         subject_id="sub-01",
         patient_name="Doe^Jane^19900101",
         study_instance_uid="study-a",
         scan_date="20260101",
         scan_time="120000",
-        directory=directory,
+        files=[],
+        source_root=source_root,
+        working_dir=working_dir,
     )
 
 
 def test_rectify_copies_retained_files_into_their_agreed_names(tmp_path: Path) -> None:
-    retained_dir = tmp_path / "sift" / "retained"
-    path_a = retained_dir / "021-DWI" / "1.dcm"
+    source_dir = tmp_path / "export"
+    path_a = source_dir / "021-DWI" / "1.dcm"
     path_a.parent.mkdir(parents=True)
     path_a.write_bytes(b"first")
-    path_b = retained_dir / "021-DWI" / "2.dcm"
+    path_b = source_dir / "021-DWI" / "2.dcm"
     path_b.write_bytes(b"second")
 
-    subject = _subject(tmp_path / "capture")
+    subject = _subject(tmp_path / "working" / "sub-01", source_dir)
     sift_result = SiftResult(
         subject=subject,
         retained=[
             _metadata(path_a, instance_number=1),
             _metadata(path_b, instance_number=2),
         ],
-        retained_dir=retained_dir,
         review=[],
-        review_dir=tmp_path / "sift" / "review",
     )
 
     result = rectify(sift_result)
@@ -70,20 +70,23 @@ def test_rectify_copies_retained_files_into_their_agreed_names(tmp_path: Path) -
     assert expected_a.read_bytes() == b"first"
     assert expected_b.read_bytes() == b"second"
     assert {f.path for f in result.files} == {expected_a, expected_b}
+    # The originals are untouched copies, not moved or linked away.
+    assert path_a.read_bytes() == b"first"
+    assert path_b.read_bytes() == b"second"
 
 
 def test_rectify_raises_when_two_different_files_would_share_a_name(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
-    retained_dir = tmp_path / "sift" / "retained"
+    source_dir = tmp_path / "export"
     path_a = make_dicom_file(
-        retained_dir / "021-DWI" / "1.dcm", SeriesInstanceUID="series-dwi", InstanceNumber=1
+        source_dir / "021-DWI" / "1.dcm", SeriesInstanceUID="series-dwi", InstanceNumber=1
     )
     path_b = make_dicom_file(
-        retained_dir / "021-DWI" / "2.dcm", SeriesInstanceUID="series-dwi", InstanceNumber=2
+        source_dir / "021-DWI" / "2.dcm", SeriesInstanceUID="series-dwi", InstanceNumber=2
     )
 
-    subject = _subject(tmp_path / "capture")
+    subject = _subject(tmp_path / "working" / "sub-01", source_dir)
     # Both mapped (deliberately, via the metadata override) to the same
     # rectified name (same series, same instance number) despite genuinely
     # different underlying file content.
@@ -93,9 +96,7 @@ def test_rectify_raises_when_two_different_files_would_share_a_name(
             _metadata(path_a, series_instance_uid="series-dwi", instance_number=1),
             _metadata(path_b, series_instance_uid="series-dwi", instance_number=1),
         ],
-        retained_dir=retained_dir,
         review=[],
-        review_dir=tmp_path / "sift" / "review",
     )
 
     with pytest.raises(DichotomiseError):
@@ -103,18 +104,16 @@ def test_rectify_raises_when_two_different_files_would_share_a_name(
 
 
 def test_rectify_review_renames_files_using_the_same_naming_scheme(tmp_path: Path) -> None:
-    review_dir = tmp_path / "sift" / "review"
-    path_a = review_dir / "021-DWI" / "1.dcm"
+    source_dir = tmp_path / "export"
+    path_a = source_dir / "021-DWI" / "1.dcm"
     path_a.parent.mkdir(parents=True)
     path_a.write_bytes(b"duplicate content")
 
-    subject = _subject(tmp_path / "capture")
+    subject = _subject(tmp_path / "working" / "sub-01", source_dir)
     sift_result = SiftResult(
         subject=subject,
         retained=[],
-        retained_dir=tmp_path / "sift" / "retained",
         review=[ReviewFile(_metadata(path_a, instance_number=1), "duplicate")],
-        review_dir=review_dir,
     )
 
     result = rectify_review(sift_result)
@@ -126,25 +125,23 @@ def test_rectify_review_renames_files_using_the_same_naming_scheme(tmp_path: Pat
 
 
 def test_rectify_review_disambiguates_colliding_names_instead_of_raising(tmp_path: Path) -> None:
-    review_dir = tmp_path / "sift" / "review"
-    path_a = review_dir / "021-DWI" / "1.dcm"
+    source_dir = tmp_path / "export"
+    path_a = source_dir / "021-DWI" / "1.dcm"
     path_a.parent.mkdir(parents=True)
     path_a.write_bytes(b"first")
-    path_b = review_dir / "021-DWI" / "2.dcm"
+    path_b = source_dir / "021-DWI" / "2.dcm"
     path_b.write_bytes(b"second")
 
-    subject = _subject(tmp_path / "capture")
+    subject = _subject(tmp_path / "working" / "sub-01", source_dir)
     # Both misfiled/duplicate files claim the exact same series+instance,
     # which is expected to happen in review -- it must not stop the run.
     sift_result = SiftResult(
         subject=subject,
         retained=[],
-        retained_dir=tmp_path / "sift" / "retained",
         review=[
             ReviewFile(_metadata(path_a, instance_number=1), "misfiled"),
             ReviewFile(_metadata(path_b, instance_number=1), "misfiled"),
         ],
-        review_dir=review_dir,
     )
 
     result = rectify_review(sift_result)

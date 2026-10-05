@@ -19,11 +19,18 @@ from dichotomise.utils.text import safe_filename_text
 
 @dataclass(frozen=True)
 class FinaliseResult:
-    """The verified, archived, final output for one subject."""
+    """The verified, archived, final output for one subject.
+
+    `source_dir` is the already-verified tree that was archived (the
+    sanitised tree if `--sanitise` was used, otherwise the rectified tree)
+    -- kept here so a caller that also wants the unarchived files (for
+    `--keep-unzipped`) doesn't need to re-derive which tree that was.
+    """
 
     subject: CapturedSubject
     subject_label: str
     archive: Archive
+    source_dir: Path
 
 
 def _expected_uncompressed_pixel_bytes(dataset: pydicom.Dataset) -> int | None:
@@ -121,7 +128,9 @@ def finalise(
     archive_path = run.archives_dir / name
     archive = make_tarball(source_dir, archive_path)
 
-    return FinaliseResult(subject=subject, subject_label=subject_label, archive=archive)
+    return FinaliseResult(
+        subject=subject, subject_label=subject_label, archive=archive, source_dir=source_dir
+    )
 
 
 def finalise_review(

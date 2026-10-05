@@ -37,8 +37,9 @@ def test_run_pipeline_produces_one_archive_per_subject_and_cleans_up_working_fil
 
     run = run_pipeline(source, tmp_path / "out")
 
-    source_archives = sorted(run.source_archive_dir.glob("*.tar.gz"))
-    final_archives = sorted(run.archives_dir.glob("*.tar.gz"))
+    # Source and dichotomised archives now share one archives/ folder.
+    source_archives = sorted(run.archives_dir.glob("*_source-archive_*.tar.gz"))
+    final_archives = sorted(run.archives_dir.glob("*_dichotomised-archive_*.tar.gz"))
     assert len(source_archives) == 2
     assert any(path.name.startswith("sub-01_") for path in source_archives)
     assert any(path.name.startswith("sub-02_") for path in source_archives)
@@ -52,6 +53,56 @@ def test_run_pipeline_produces_one_archive_per_subject_and_cleans_up_working_fil
     assert any(name.endswith(".dcm") for name in names)
 
 
+def test_run_pipeline_does_not_cross_contaminate_subjects_sharing_one_source_folder(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    # Two subjects' files interleaved in the exact same literal folder: since
+    # capture() no longer copies each subject into a folder of their own,
+    # audit's per-folder majority vote must still only ever see one
+    # subject's own files, never the other subject's sharing that folder.
+    source = tmp_path / "export"
+    make_dicom_file(
+        source / "mixed" / "a1.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="study-a",
+        SeriesInstanceUID="series-a",
+        SeriesNumber=1,
+        InstanceNumber=1,
+    )
+    make_dicom_file(
+        source / "mixed" / "a2.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="study-a",
+        SeriesInstanceUID="series-a",
+        SeriesNumber=1,
+        InstanceNumber=2,
+    )
+    make_dicom_file(
+        source / "mixed" / "b1.dcm",
+        PatientID="sub-02",
+        StudyInstanceUID="study-b",
+        SeriesInstanceUID="series-b",
+        SeriesNumber=2,
+        InstanceNumber=1,
+    )
+    make_dicom_file(
+        source / "mixed" / "b2.dcm",
+        PatientID="sub-02",
+        StudyInstanceUID="study-b",
+        SeriesInstanceUID="series-b",
+        SeriesNumber=2,
+        InstanceNumber=2,
+    )
+
+    run = run_pipeline(source, tmp_path / "out")
+
+    assert len(list(run.archives_dir.glob("*_dichotomised-archive_*.tar.gz"))) == 2
+    for report_dir in run.reports_dir.iterdir():
+        audit_report = json.loads((report_dir / "stage-01-report.json").read_text())
+        assert audit_report["misfiled_count"] == 0
+        assert audit_report["duplicate_count"] == 0
+
+
 def test_run_pipeline_keeps_working_files_when_requested(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
@@ -61,6 +112,40 @@ def test_run_pipeline_keeps_working_files_when_requested(
     run = run_pipeline(source, tmp_path / "out", keep_working_files=True)
 
     assert run.working_dir.exists()
+
+
+def test_run_pipeline_keeps_the_final_tree_unzipped_when_requested(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(
+        source / "021-DWI" / "1.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="study-a",
+        SeriesInstanceUID="series-a",
+        SeriesNumber=21,
+    )
+
+    run = run_pipeline(source, tmp_path / "out", keep_unzipped=True)
+
+    final_dirs = list(run.final_dir.iterdir())
+    assert len(final_dirs) == 1
+    unzipped_files = [p for p in final_dirs[0].rglob("*") if p.is_file()]
+    assert len(unzipped_files) == 1
+    assert unzipped_files[0].suffix == ".dcm"
+    # Independent of keep_working_files: the working tree is still cleaned up.
+    assert not run.working_dir.exists()
+
+
+def test_run_pipeline_without_keep_unzipped_creates_no_final_dir(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+
+    run = run_pipeline(source, tmp_path / "out")
+
+    assert not run.final_dir.exists()
 
 
 def test_run_pipeline_sanitise_default_label_mode_uses_patient_name(
@@ -76,9 +161,14 @@ def test_run_pipeline_sanitise_default_label_mode_uses_patient_name(
 
     run = run_pipeline(source, tmp_path / "out", sanitise_requested=True)
 
-    archives = list(run.archives_dir.glob("*.tar.gz"))
+    # The source archive always keeps the real PatientID; only the
+    # dichotomised archive is sanitised.
+    archives = list(run.archives_dir.glob("*_dichotomised-archive_*.tar.gz"))
     assert len(archives) == 1
     assert "sub-01" not in archives[0].name
+    source_archives = list(run.archives_dir.glob("*_source-archive_*.tar.gz"))
+    assert len(source_archives) == 1
+    assert "sub-01" in source_archives[0].name
 
 
 def test_run_pipeline_sanitise_numerical_label_mode(
@@ -95,7 +185,7 @@ def test_run_pipeline_sanitise_numerical_label_mode(
         subject_id="7",
     )
 
-    archives = list(run.archives_dir.glob("*.tar.gz"))
+    archives = list(run.archives_dir.glob("*_dichotomised-archive_*.tar.gz"))
     assert "sub-0007" in archives[0].name
 
 

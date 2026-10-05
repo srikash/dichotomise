@@ -29,7 +29,7 @@ def _metadata(path: Path, **overrides: object):
     return DicomMetadata(**defaults)  # type: ignore[arg-type]
 
 
-def test_sift_copies_files_into_retained_and_review_folders(tmp_path: Path) -> None:
+def test_sift_splits_files_into_retained_and_review_without_copying(tmp_path: Path) -> None:
     capture_dir = tmp_path / "capture"
     (capture_dir / "021-DWI").mkdir(parents=True)
     ok_path = capture_dir / "021-DWI" / "1.dcm"
@@ -45,7 +45,9 @@ def test_sift_copies_files_into_retained_and_review_folders(tmp_path: Path) -> N
         study_instance_uid="study-a",
         scan_date="20260101",
         scan_time="120000",
-        directory=capture_dir,
+        files=[],
+        source_root=capture_dir,
+        working_dir=tmp_path / "working" / "sub-01",
     )
     audit_result = AuditResult(
         subject=subject,
@@ -64,13 +66,11 @@ def test_sift_copies_files_into_retained_and_review_folders(tmp_path: Path) -> N
 
     result = sift(audit_result)
 
-    assert [m.path.name for m in result.retained] == ["1.dcm"]
-    assert (result.retained_dir / "021-DWI" / "1.dcm").read_bytes() == b"ok file"
+    # Retained/review are a logical split: paths are untouched originals.
+    assert [m.path for m in result.retained] == [ok_path]
+    assert ok_path.read_bytes() == b"ok file"
 
-    review_by_reason = {r.reason: r.metadata.path.name for r in result.review}
-    assert review_by_reason == {"duplicate": "2.dcm", "misfiled": "3.dcm"}
-    assert (result.review_dir / "021-DWI" / "2.dcm").read_bytes() == b"duplicate file"
-    assert (result.review_dir / "021-DWI" / "3.dcm").read_bytes() == b"misfiled file"
-
-    # Retained metadata points at the new, retained-folder location.
-    assert result.retained[0].path == result.retained_dir / "021-DWI" / "1.dcm"
+    review_by_reason = {r.reason: r.metadata.path for r in result.review}
+    assert review_by_reason == {"duplicate": duplicate_path, "misfiled": misfiled_path}
+    assert duplicate_path.read_bytes() == b"duplicate file"
+    assert misfiled_path.read_bytes() == b"misfiled file"

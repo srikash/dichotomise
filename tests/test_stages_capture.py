@@ -16,25 +16,25 @@ def _run(tmp_path: Path):
     return start_run(out_dir, now=datetime(2026, 9, 22, 14, 30, 12, tzinfo=UTC))
 
 
-def test_capture_groups_files_by_patient_and_study_and_copies_them(
+def test_capture_groups_files_by_patient_and_study_without_copying(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
-    make_dicom_file(
+    file_1 = make_dicom_file(
         source / "DWI_21_MR" / "1.dcm",
         PatientID="sub-01",
         StudyInstanceUID="study-a",
         StudyDate="20260101",
         StudyTime="120000",
     )
-    make_dicom_file(
+    file_2 = make_dicom_file(
         source / "DWI_21_MR" / "2.dcm",
         PatientID="sub-01",
         StudyInstanceUID="study-a",
         StudyDate="20260101",
         StudyTime="120000",
     )
-    make_dicom_file(
+    file_3 = make_dicom_file(
         source / "other_subject" / "1.dcm",
         PatientID="sub-02",
         StudyInstanceUID="study-b",
@@ -48,8 +48,12 @@ def test_capture_groups_files_by_patient_and_study_and_copies_them(
     sub01 = next(subject for subject in subjects if subject.subject_id == "sub-01")
     assert sub01.scan_date == "20260101"
     assert sub01.scan_time == "120000"
-    copied = sorted(p.name for p in sub01.directory.rglob("*.dcm"))
-    assert copied == ["1.dcm", "2.dcm"]
+    assert {metadata.path for metadata in sub01.files} == {file_1, file_2}
+    assert sub01.source_root == source
+
+    # Nothing was copied anywhere: the files are exactly where they started.
+    assert sorted(source.rglob("*.dcm")) == sorted([file_1, file_2, file_3])
+    assert not run.working_dir.exists()
 
 
 def test_capture_ignores_non_dicom_files(
@@ -62,7 +66,7 @@ def test_capture_ignores_non_dicom_files(
 
     subjects = capture(source, run)
 
-    all_files = [p for subject in subjects for p in subject.directory.rglob("*") if p.is_file()]
+    all_files = [metadata.path for subject in subjects for metadata in subject.files]
     assert all(p.suffix == ".dcm" for p in all_files)
 
 

@@ -113,6 +113,11 @@ def _reports_dir_for(run: Run, subject_label: str, output_token: str) -> Path:
     return run.reports_dir / f"{safe_filename_text(subject_label)}_{output_token}"
 
 
+def _final_dir_for(run: Run, subject_label: str, output_token: str) -> Path:
+    """Return this study's collision-safe directory under final/ (--keep-unzipped)."""
+    return run.final_dir / f"{safe_filename_text(subject_label)}_{output_token}"
+
+
 def _archive_source_subject(subject: CapturedSubject, run: Run) -> None:
     """Archive one captured study before it is audited or transformed."""
     source_archive(subject, run)
@@ -130,6 +135,7 @@ def _process_subject(
     subject_mappings: Mapping[str, str] | None,
     used_labels: set[str],
     used_output_tokens: set[str],
+    keep_unzipped: bool,
     on_audit: Callable[[AuditResult], None] | None,
     on_stage: StageCallback | None,
 ) -> None:
@@ -234,6 +240,14 @@ def _process_subject(
         sanitise_result=sanitise_result,
     )
 
+    if keep_unzipped:
+        final_dir = _final_dir_for(run, subject_label, output_token)
+        _run_stage(
+            f"{subject_prefix}: keeping the final files unzipped",
+            lambda: shutil.copytree(finalise_result.source_dir, final_dir),
+            on_stage,
+        )
+
 
 def run_pipeline(
     source_dir: Path,
@@ -246,6 +260,7 @@ def run_pipeline(
     new_id: str | None = None,
     subject_mappings: Mapping[str, str] | None = None,
     keep_working_files: bool = False,
+    keep_unzipped: bool = False,
     on_audit: Callable[[AuditResult], None] | None = None,
     on_stage: StageCallback | None = None,
     on_warning: WarningCallback | None = None,
@@ -255,6 +270,11 @@ def run_pipeline(
     `sanitise_level` selects a policy filename (see docs/sanitise-policies.md).
     The command line chooses the internal label mode from the selected policy
     and any numerical, exact, or mapped replacement ID supplied.
+
+    `keep_unzipped`, independent of `keep_working_files`, additionally copies
+    each subject's final (optionally sanitised) tree into `final/`,
+    unarchived -- e.g. for a BIDS conversion that wants plain files on disk
+    rather than a tarball.
     """
     run = start_run(out_dir)
     try:
@@ -294,6 +314,7 @@ def run_pipeline(
                 subject_mappings=subject_mappings,
                 used_labels=used_labels,
                 used_output_tokens=used_output_tokens,
+                keep_unzipped=keep_unzipped,
                 on_audit=on_audit,
                 on_stage=on_stage,
             )
