@@ -83,7 +83,7 @@ applicable entities identify the data within the filename itself.
    contradicts the DICOM header, the name offers no independent clue.
    
    [Example Incident 1](#incident-1-dicom-placed-in-the-wrong-series) shows that this
-   disagreement occurred in a single export with no user intervention.
+   disagreement occurred within a single export.
 
 3. **Make collisions visible before they cost data.** When exports are
    combined, flattened or restored into one directory, repeated names
@@ -100,29 +100,39 @@ applicable entities identify the data within the filename itself.
    provenance harder to recover from the export, even though metadata remains
    in the DICOM.
 
-   [Example Incident 2](#incident-2-interleaved-dwi-duplication) shows
+   [Example Incident 2](#incident-2-duplicated-dwi-series) shows
    why a plausible filename sequence cannot serve as an audit.
 
 ### Two example incidents (from amongst several)
 
 We noticed inconsistencies in scanner exports and inspected the DICOM metadata
-manually. Both incidents below were present before anyone copied, moved or
-processed the files. They are examples of the intermittent, inconsistent
-errors we have encountered, not an exhaustive list. These occur in product sequences
+manually. Both incidents below were found in the export as received, from the
+DICOM headers, before any sorting or processing by dichotomise. They come from
+the same Siemens MAGNETOM Terra.X (`syngo MR XA60`) and are examples of the
+intermittent errors we have encountered, not an exhaustive list. These occur in product sequences
 and C2Ps alike.
 
 #### Incident 1: DICOM placed in the wrong series
 
-`300.dcm` appeared in the folder for Series 21. We checked its DICOM Series
-Number and Instance UID and found that the file belonged to Series 22. The
-export's folder contradicted the file's metadata.
+`300.dcm` appeared in the folder for Series 21. Its header gives SeriesNumber 22,
+a SeriesInstanceUID different from the other 300 files in the folder, and
+InstanceNumber 5. It is the only file with SeriesNumber 22 in that export, so
+Series 22 has no folder of its own. The export's folder contradicted the file's
+metadata. The same fault was seen again elsewhere: a SeriesNumber 24 file in the
+Series 23 folder, with the genuine Series 23 instance absent from the export.
 
-#### Incident 2: Interleaved DWI duplication
+#### Incident 2: Duplicated DWI series
 
-We expected 81 DICOMs in a DWI series, but the export contained 162. Manual
-inspection found that duplicates were randomly interleaved with the original
-files, rather than appended as a second sequence. The filename range and file
-count alone could not show which files were duplicated.
+We expected 81 DICOMs in each DWI series (the protocol has 81 diffusion
+directions), but each export folder contained 162. Files `1.dcm`-`81.dcm` held
+instances 1-81 and files `82.dcm`-`162.dcm` held instances 1-81 again. Each
+duplicate pair was byte-identical and shared its SOPInstanceUID. The file
+times show the two blocks were written about half an hour apart: the second
+pass carried on numbering from the next free integer instead of recognising
+instances already on disk. The same happened to a
+300-measurement fMRI series (600 files for 300 expected). The filenames `1`-`162`
+look like one valid sequence; only the file count or a header audit reveals the
+problem.
 
 # dichotomise to the rescue
 
