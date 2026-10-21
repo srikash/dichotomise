@@ -88,11 +88,16 @@ def pseudonymised_audit(
         )
     }
 
+    shown_names: dict[tuple[Path, Path], Path] = {}
+
     def shown_group(audited_file: AuditedFile) -> Path | None:
         group = audited_file.series_folder
         if group is None:
             return None
-        return names[audited_file.metadata.path].parent / f"series-{series_number[group]:03d}"
+        parent = names[audited_file.metadata.path].parent
+        return shown_names.setdefault(
+            (parent, group), parent / f"series-{series_number[group]:03d}"
+        )
 
     def shown(description: str) -> str:
         if not hide_series_descriptions:

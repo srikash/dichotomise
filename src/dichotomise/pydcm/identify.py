@@ -6,7 +6,7 @@ import hashlib
 from collections import Counter
 from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.utils.text import natural_sort_key
@@ -91,7 +91,9 @@ def _majority(values: Iterable[_T]) -> _T | None:
     return tied[0] if len(tied) == 1 else None
 
 
-def find_misfiled_files(files_by_folder: Mapping[str, Sequence[DicomMetadata]]) -> set[Path]:
+def find_misfiled_files(
+    files_by_folder: Mapping[Any, Sequence[DicomMetadata]],
+) -> set[Path]:
     """Return files whose own series details disagree with their folder's majority.
 
     For each folder, the series identifier, series number, and scan protocol

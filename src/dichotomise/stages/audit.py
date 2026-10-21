@@ -11,7 +11,7 @@ from dichotomise.errors import NoDicomFilesFoundError
 from dichotomise.pydcm.acquisition import summarise_acquisition
 from dichotomise.pydcm.identify import find_duplicate_pairs, find_misfiled_files, find_sop_conflicts
 from dichotomise.pydcm.read import DicomMetadata, iter_dicom_metadata
-from dichotomise.stages.capture import CapturedSubject, group_by_subject
+from dichotomise.stages.capture import CapturedSubject, group_by_subject, subject_from_files
 from dichotomise.utils.text import natural_sort_key, safe_filename_text
 
 _CONSISTENCY_FIELDS: tuple[tuple[str, str], ...] = (
@@ -94,14 +94,8 @@ def audit_directory(directory: Path) -> list[AuditResult]:
         raise NoDicomFilesFoundError(f"No DICOM files were found under {directory}")
     results = []
     for output_number, subject_files in enumerate(files_by_subject.values(), start=1):
-        first = subject_files[0]
-        subject = CapturedSubject(
-            subject_id=first.patient_id,
-            patient_name=first.patient_name,
-            study_instance_uid=first.study_instance_uid,
-            scan_date=first.study_date,
-            scan_time=first.study_time,
-            files=subject_files,
+        subject = subject_from_files(
+            subject_files,
             source_root=directory,
             working_dir=directory,  # unused: QC mode never writes, so there's nothing to anchor
             output_number=output_number,
@@ -134,10 +128,11 @@ def _is_multi_series_folder(items: Sequence[DicomMetadata]) -> bool:
     container and are not flagged.
     """
     series = {item.series_instance_uid for item in items}
+    if len(series) < 2:
+        return False
     if len(series) >= 3:
         return True
-    named_by_uid = sum(_is_named_after_own_uid(item) for item in items)
-    return len(series) >= 2 and named_by_uid * 2 > len(items)
+    return sum(_is_named_after_own_uid(item) for item in items) * 2 > len(items)
 
 
 def _series_folders(files_by_folder: Mapping[Path, Sequence[DicomMetadata]]) -> dict[Path, Path]:
@@ -198,10 +193,9 @@ def _audit_files(files: Sequence[DicomMetadata], subject: CapturedSubject) -> Au
         duplicate_of.update(find_duplicate_pairs(candidates, digests))
 
     series_folder = _series_folders(metadata_by_folder)
-    metadata_by_group: dict[str, list[DicomMetadata]] = defaultdict(list)
+    metadata_by_group: dict[Path, list[DicomMetadata]] = defaultdict(list)
     for metadata in files:
-        group = series_folder.get(metadata.path, metadata.path.parent)
-        metadata_by_group[str(group)].append(metadata)
+        metadata_by_group[series_folder.get(metadata.path, metadata.path.parent)].append(metadata)
     misfiled = find_misfiled_files(metadata_by_group)
 
     audited_files = [

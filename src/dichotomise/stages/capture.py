@@ -58,6 +58,24 @@ def group_by_subject(files: Iterable[DicomMetadata]) -> dict[tuple[str, str], li
     return {key: files_by_subject[key] for key in sorted(files_by_subject)}
 
 
+def subject_from_files(
+    files: list[DicomMetadata], *, source_root: Path, working_dir: Path, output_number: int
+) -> CapturedSubject:
+    """Build a subject from its files, taking the identity fields from the first file."""
+    first = files[0]
+    return CapturedSubject(
+        subject_id=first.patient_id,
+        patient_name=first.patient_name,
+        study_instance_uid=first.study_instance_uid,
+        scan_date=first.study_date,
+        scan_time=first.study_time,
+        files=files,
+        source_root=source_root,
+        working_dir=working_dir,
+        output_number=output_number,
+    )
+
+
 def capture(source_dir: Path, run: Run) -> list[CapturedSubject]:
     """Group every scan file under `source_dir` by subject, without copying any of them.
 
@@ -77,16 +95,10 @@ def capture(source_dir: Path, run: Run) -> list[CapturedSubject]:
     captured: list[CapturedSubject] = []
     for output_number, key in enumerate(files_by_subject, start=1):
         files = sorted(files_by_subject[key], key=lambda metadata: metadata.path)
-        first = files[0]
-        folder_name = _subject_folder_name(first, used_names)
+        folder_name = _subject_folder_name(files[0], used_names)
         captured.append(
-            CapturedSubject(
-                subject_id=first.patient_id,
-                patient_name=first.patient_name,
-                study_instance_uid=first.study_instance_uid,
-                scan_date=first.study_date,
-                scan_time=first.study_time,
-                files=files,
+            subject_from_files(
+                files,
                 source_root=source_dir,
                 working_dir=run.working_dir / folder_name,
                 output_number=output_number,

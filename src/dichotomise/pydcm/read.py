@@ -180,6 +180,15 @@ def _worker_count() -> int:
     return max(1, min(available, _MAX_WORKERS))
 
 
+def _read_all(paths: list[Path]) -> list[DicomMetadata | None]:
+    """Read every path, with a pool of processes for a large export and serially otherwise."""
+    if len(paths) >= _PARALLEL_MIN_FILES:
+        results = _read_in_parallel(paths)
+        if results is not None:
+            return results
+    return [_read_or_none(path) for path in paths]
+
+
 def _read_in_parallel(paths: list[Path]) -> list[DicomMetadata | None] | None:
     """Read `paths` with a pool of processes, or return None if one cannot be used here."""
     workers = _worker_count()
@@ -203,10 +212,7 @@ def iter_dicom_metadata(root: Path) -> Iterator[DicomMetadata]:
     they were read serially or in parallel.
     """
     paths = sorted(p for p in root.rglob("*") if p.is_file())
-    results = _read_in_parallel(paths) if len(paths) >= _PARALLEL_MIN_FILES else None
-    if results is None:
-        results = [_read_or_none(path) for path in paths]
-    for metadata in results:
+    for metadata in _read_all(paths):
         if metadata is not None:
             yield metadata
 
