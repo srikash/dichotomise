@@ -473,6 +473,73 @@ def test_run_pipeline_sanitised_run_writes_a_source_map_beside_the_source_archiv
     assert rows["folder-01/0002"]["final_file"].endswith("_e01.dcm")
 
 
+def test_run_pipeline_writes_the_source_map_before_sanitising_so_a_failed_run_keeps_it(
+    tmp_path: Path, make_dicom_file: Callable[..., Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "export"
+    _export_with_identifying_names(source, make_dicom_file)
+
+    def _fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("sanitise failed")
+
+    monkeypatch.setattr("dichotomise.pipeline.sanitise", _fail)
+
+    with pytest.raises(RuntimeError, match="sanitise failed"):
+        run_pipeline(source, tmp_path / "out", sanitise_requested=True)
+
+    (source_map,) = (tmp_path / "out").rglob("*_source-map_*.csv")
+    rows = list(csv.DictReader(source_map.read_text().splitlines()))
+    assert [row["report_name"] for row in rows] == ["folder-01/0001", "folder-01/0002"]
+    assert rows[0]["source_file"] == "M0450__secret-folder/MRe.9.8.7.6.1"
+    assert rows[0]["status"] == "retained"
+    assert rows[0]["final_file"] == ""
+
+
+def test_run_pipeline_full_policy_keeps_the_series_description_out_of_names_and_reports(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(
+        source / "021" / "1.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="9.8.7.6.0",
+        SeriesInstanceUID="9.8.7.6.5",
+        SeriesNumber=21,
+        SeriesDescription="secret-protocol",
+    )
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=True, sanitise_level="full")
+
+    (archive,) = run.archives_dir.glob("*_dichotomised-archive_*.tar.gz")
+    with tarfile.open(archive, "r:gz") as tar:
+        members = [member.name for member in tar.getmembers()]
+    assert not any("secret-protocol" in name for name in members)
+    assert any(name.startswith("021/") for name in members)
+    for report_file in run.reports_dir.rglob("*"):
+        if report_file.is_file():
+            assert "secret-protocol" not in report_file.read_text()
+
+
+def test_run_pipeline_standard_policy_keeps_the_series_description_in_folder_names(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(
+        source / "021" / "1.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="9.8.7.6.0",
+        SeriesInstanceUID="9.8.7.6.5",
+        SeriesNumber=21,
+        SeriesDescription="kept-protocol",
+    )
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=True, sanitise_level="standard")
+
+    (archive,) = run.archives_dir.glob("*_dichotomised-archive_*.tar.gz")
+    with tarfile.open(archive, "r:gz") as tar:
+        assert any("021-kept-protocol/" in member.name for member in tar.getmembers())
+
+
 def test_run_pipeline_unsanitised_reports_keep_the_real_names_and_write_no_source_map(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:

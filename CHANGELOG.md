@@ -1,6 +1,8 @@
 # Changelog
 
-## v2.7.2
+## v2.7.4
+
+This release also carries the changes prepared as v2.7.2 and v2.7.3, which were never published.
 
 Fix: a byte-identical copy of a file in another folder (for example two copies of one
 export under one `--source-dir`) made the run fail at finalise with "Expected 2 file(s) in the
@@ -16,6 +18,14 @@ included) and `stage-02`, and `stage-03` shows the reissued SeriesInstanceUID (u
 `stage-03` still shows the original ones, as the archive does). The way back to the real
 names is `<patient-id>_<hex>_source-map_<timestamp>.csv` in `archives/`, beside the source archive,
 which already holds the real identity. Unsanitised runs, `--qc` and the printed NOTES are unchanged.
+
+The source map is written as soon as the audit has sorted the files, so a run that fails partway still
+leaves the way back to the real names (its `final_file` column is blank until the run finishes).
+
+Fix: a policy that does not keep the series description (such as `full`) left it in the archive's
+folder names, in `stage-03` (`series_description`) and in the NOTES that quote a misfiled file's
+series. Folders are now named by series number alone, `stage-03` shows `null`, and the NOTES use
+`description-N`.
 
 Also: the audit's duplicate note used the filename `.dcm` even for files without that extension.
 

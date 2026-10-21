@@ -25,6 +25,7 @@ from dichotomise.stages.rectify import rectify, rectify_review
 from dichotomise.stages.reports import (
     pseudonymised_audit,
     pseudonymous_source_names,
+    source_map_final_files,
     write_audit_report,
     write_finalise_report,
     write_retained_manifest,
@@ -176,6 +177,10 @@ def _process_subject(
     # A sanitised run's reports name files by position, never by the source
     # filename, folder or UID, which can carry a participant code or scan time.
     names = pseudonymous_source_names(subject.files) if sanitise_requested else None
+    policy = load_policy(sanitise_level) if sanitise_requested else None
+    # A policy that removes or replaces the series description must not leave it in
+    # folder names or reports either.
+    describe_series = policy is None or policy.keeps("SeriesDescription")
     write_source_manifest(subject, reports_dir, names=names)
 
     def _bind_progress(description: str) -> Callable[[int, int], None] | None:
@@ -188,7 +193,9 @@ def _process_subject(
     if on_audit is not None:
         on_audit(audit_result)
     write_audit_report(
-        pseudonymised_audit(audit_result, names) if names else audit_result,
+        pseudonymised_audit(audit_result, names, hide_series_descriptions=not describe_series)
+        if names
+        else audit_result,
         reports_dir,
         subject_label=subject_label,
     )
@@ -198,18 +205,24 @@ def _process_subject(
     )
     write_retained_manifest(sift_result, reports_dir, names=names)
     write_review_manifest(sift_result, reports_dir, names=names)
+    source_map_path = _source_map_path(source_archive_path)
+    if names:
+        write_source_map(source_map_path, sift_result, names)
 
     rectify_result = _run_stage(
-        f"{subject_prefix}: rectifying retained files", lambda: rectify(sift_result), on_stage
+        f"{subject_prefix}: rectifying retained files",
+        lambda: rectify(sift_result, describe_series=describe_series),
+        on_stage,
     )
     rectify_review_result = _run_stage(
-        f"{subject_prefix}: renaming review files", lambda: rectify_review(sift_result), on_stage
+        f"{subject_prefix}: renaming review files",
+        lambda: rectify_review(sift_result, describe_series=describe_series),
+        on_stage,
     )
 
     sanitise_result = None
     sanitise_review_result = None
-    if sanitise_requested:
-        policy = load_policy(sanitise_level)
+    if policy is not None:
         replacement_cache: dict[str, str] = {}
         sanitise_result = _run_stage(
             f"{subject_prefix}: sanitising files",
@@ -280,16 +293,20 @@ def _process_subject(
         rectify_result=rectify_result,
         sanitise_result=sanitise_result,
         names=names,
+        describe_series=describe_series,
     )
     if names:
         write_source_map(
-            _source_map_path(source_archive_path),
-            sift_result=sift_result,
-            rectify_result=rectify_result,
-            rectify_review_result=rectify_review_result,
-            sanitise_result=sanitise_result,
-            sanitise_review_result=sanitise_review_result,
-            names=names,
+            source_map_path,
+            sift_result,
+            names,
+            source_map_final_files(
+                sift_result,
+                rectify_result,
+                rectify_review_result,
+                sanitise_result,
+                sanitise_review_result,
+            ),
         )
 
     if keep_unzipped:

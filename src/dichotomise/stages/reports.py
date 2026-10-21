@@ -61,12 +61,33 @@ def pseudonymous_source_names(files: Sequence[DicomMetadata]) -> dict[Path, Path
     return names
 
 
-def pseudonymised_audit(audit_result: AuditResult, names: Mapping[Path, Path]) -> AuditResult:
-    """Return `audit_result` with every source path replaced by its pseudonymous name."""
+def pseudonymised_audit(
+    audit_result: AuditResult,
+    names: Mapping[Path, Path],
+    *,
+    hide_series_descriptions: bool = False,
+) -> AuditResult:
+    """Return `audit_result` with every source path replaced by its pseudonymous name.
+
+    With `hide_series_descriptions`, each distinct series description becomes
+    `description-N` (in order of first appearance), so findings that compare
+    descriptions still work without printing them.
+    """
+    labels: dict[str, str] = {}
+
+    def shown(description: str) -> str:
+        if not hide_series_descriptions:
+            return description
+        return labels.setdefault(description, f"description-{len(labels) + 1}")
+
     files = [
         replace(
             audited_file,
-            metadata=replace(audited_file.metadata, path=names[audited_file.metadata.path]),
+            metadata=replace(
+                audited_file.metadata,
+                path=names[audited_file.metadata.path],
+                series_description=shown(audited_file.metadata.series_description),
+            ),
             duplicate_of=names[audited_file.duplicate_of] if audited_file.duplicate_of else None,
         )
         for audited_file in audit_result.files
@@ -290,6 +311,7 @@ def _series_inventory(
     rectify_result: RectifyResult,
     sanitise_result: SanitiseResult | None,
     names: Mapping[Path, Path] | None = None,
+    describe_series: bool = True,
 ) -> list[dict[str, object]]:
     """Return one filename mapping for the first retained DICOM in each series.
 
@@ -341,7 +363,7 @@ def _series_inventory(
                     shown_series_uid = str(header.get("SeriesInstanceUID", "")) or None
         entry: dict[str, object] = {
             "series_number": metadata.series_number,
-            "series_description": metadata.series_description,
+            "series_description": metadata.series_description if describe_series else None,
             "series_instance_uid": shown_series_uid,
             "source_file_count": len(source_files),
             "archived_file_count": len(rectified_files),
@@ -380,6 +402,7 @@ def write_finalise_report(
     rectify_result: RectifyResult | None = None,
     sanitise_result: SanitiseResult | None = None,
     names: Mapping[Path, Path] | None = None,
+    describe_series: bool = True,
 ) -> Path:
     """Write stage-03-report.json: archive details and per-series filename mappings."""
     data = {
@@ -393,26 +416,19 @@ def write_finalise_report(
     }
     if audit_result is not None and rectify_result is not None:
         data["series_inventory"] = _series_inventory(
-            audit_result, rectify_result, sanitise_result, names
+            audit_result, rectify_result, sanitise_result, names, describe_series
         )
     return _write(reports_dir, "stage-03-report.json", data)
 
 
-def write_source_map(
-    map_path: Path,
-    *,
+def source_map_final_files(
     sift_result: SiftResult,
     rectify_result: RectifyResult,
     rectify_review_result: RectifyReviewResult,
     sanitise_result: SanitiseResult | None,
     sanitise_review_result: SanitiseReviewResult | None,
-    names: Mapping[Path, Path],
-) -> Path:
-    """Write the CSV that links a sanitised run's pseudonymous report names to the real ones.
-
-    It holds real source paths, so it sits in archives/ beside the source
-    archive, which already holds the real identity, and never in reports/.
-    """
+) -> dict[Path, str]:
+    """Map each source file to its final path inside the dichotomised or review archive."""
     final_tree = sanitise_result.sanitised_dir if sanitise_result else rectify_result.rectified_dir
     final_path_by_rectified = (
         dict(zip((m.path for m in rectify_result.files), sanitise_result.files, strict=True))
@@ -435,35 +451,49 @@ def write_source_map(
         if sanitise_review_result is not None
         else {}
     )
-    rows: list[tuple[Path, str, str]] = []
+    final_files: dict[Path, str] = {}
     for item in sift_result.retained:
         target = rectify_result.target_by_source[item.path]
         final = final_path_by_rectified.get(target, target)
-        rows.append((item.path, "retained", final.relative_to(final_tree).as_posix()))
+        final_files[item.path] = final.relative_to(final_tree).as_posix()
     for review_item in sift_result.review:
         target = rectify_review_result.target_by_source[review_item.metadata.path]
         final = final_review_by_rectified.get(target, target)
-        rows.append(
-            (
-                review_item.metadata.path,
-                f"review:{review_item.reason}",
-                final.relative_to(review_tree).as_posix(),
-            )
-        )
+        final_files[review_item.metadata.path] = final.relative_to(review_tree).as_posix()
+    return final_files
+
+
+def write_source_map(
+    map_path: Path,
+    sift_result: SiftResult,
+    names: Mapping[Path, Path],
+    final_files: Mapping[Path, str] | None = None,
+) -> Path:
+    """Write the CSV that links a sanitised run's pseudonymous report names to the real ones.
+
+    It holds real source paths, so it sits in archives/ beside the source
+    archive, which already holds the real identity, and never in reports/.
+    It is written once up front, so a run that fails partway still leaves the
+    way back to the real names, and again at the end with `final_files`
+    filled in (it is blank until then).
+    """
+    rows = [(item.path, "retained") for item in sift_result.retained] + [
+        (item.metadata.path, f"review:{item.reason}") for item in sift_result.review
+    ]
     map_path.parent.mkdir(parents=True, exist_ok=True)
     with map_path.open("w", newline="") as handle:
         writer = csv.DictWriter(
             handle, fieldnames=["report_name", "source_file", "size_bytes", "status", "final_file"]
         )
         writer.writeheader()
-        for source, status, final_name in sorted(rows, key=lambda row: names[row[0]]):
+        for source, status in sorted(rows, key=lambda row: names[row[0]]):
             writer.writerow(
                 {
                     "report_name": names[source].as_posix(),
                     "source_file": _relative(source, sift_result.subject.source_root),
                     "size_bytes": source.stat().st_size,
                     "status": status,
-                    "final_file": final_name,
+                    "final_file": final_files[source] if final_files else "",
                 }
             )
     return map_path

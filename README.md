@@ -1,4 +1,4 @@
-# dichotomise [![Version](https://img.shields.io/badge/version-2.7.2-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.7.2) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
+# dichotomise [![Version](https://img.shields.io/badge/version-2.7.4-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.7.4) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
 
 <b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
 de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
@@ -275,10 +275,10 @@ installing Python packages directly isn't an option.
 
 ```bash
 # Docker
-docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.7.2 --help
+docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.7.4 --help
 
 # Apptainer / Singularity
-apptainer run oras://ghcr.io/srikash/dichotomise:2.7.2-sif --help
+apptainer run oras://ghcr.io/srikash/dichotomise:2.7.4-sif --help
 ```
 
 Mount your source and output directories under `/data` (the image's working
@@ -298,7 +298,7 @@ since it delegates straight into the containerized CLI), auto-detects
 ```
 
 Set `DICHOTOMISE_ENGINE=docker|apptainer` to force an engine, and
-`DICHOTOMISE_VERSION=2.7.2` (default `latest`) to pin a release.
+`DICHOTOMISE_VERSION=2.7.4` (default `latest`) to pin a release.
 
 ## Usage
 
@@ -432,9 +432,10 @@ the original SeriesInstanceUID can hold a participant code, the scan date and ti
 SOP Instance UID, so the manifests, `stage-01` and `stage-02` list files as `folder-NN/NNNN` and
 `stage-03` shows the reissued SeriesInstanceUID. (The `retain` policy reissues no UIDs, so there
 `stage-03` keeps the original UIDs, as the archive does.) `<patient-id>_<hex>_source-map_<run-timestamp>.csv`
-in `archives/` maps each `folder-NN/NNNN` back to its source file, size, retained or review status
+in `archives/`, written as soon as the audit has sorted the files, maps each `folder-NN/NNNN` back to its source file, size, retained or review status
 and final filename. It holds real names, so keep it with the source archive and out of anything you
-share.
+share. A policy that does not keep the series description (such as `full`) also keeps it out of
+the archive's folder names (they become just the series number) and out of the reports.
 
 Compression is always `.tar.gz`; `pigz` is used when it is on `PATH`.
 

@@ -30,7 +30,7 @@ class RectifyResult:
     target_by_source: dict[Path, Path] = field(default_factory=dict)
 
 
-def rectify(sift_result: SiftResult) -> RectifyResult:
+def rectify(sift_result: SiftResult, *, describe_series: bool = True) -> RectifyResult:
     """Copy every retained file into its rectified name and folder.
 
     A byte-identical file that lands on a name already written is the same
@@ -48,7 +48,7 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
     target_by_source: dict[Path, Path] = {}
 
     for metadata in sift_result.retained:
-        target = rectified_path(rectified_dir, metadata)
+        target = rectified_path(rectified_dir, metadata, describe_series=describe_series)
         if target in occupied:
             if file_digest(occupied[target].path) != file_digest(metadata.path):
                 raise NamingCollisionError(
@@ -84,7 +84,7 @@ class RectifyReviewResult:
     target_by_source: dict[Path, Path] = field(default_factory=dict)
 
 
-def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
+def rectify_review(sift_result: SiftResult, *, describe_series: bool = True) -> RectifyReviewResult:
     """Copy every review file into its rectified name, tolerating collisions.
 
     Uses the same naming as rectify() so a reviewer can see immediately
@@ -104,7 +104,9 @@ def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
     target_by_source: dict[Path, Path] = {}
 
     for item in sift_result.review:
-        target = rectified_path(review_rectified_dir, item.metadata)
+        target = rectified_path(
+            review_rectified_dir, item.metadata, describe_series=describe_series
+        )
         digest = file_digest(item.metadata.path)
         previous = written.setdefault(target, [])
         matched = next((path for path in previous if file_digest(path) == digest), None)

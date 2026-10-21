@@ -8,10 +8,14 @@ from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.utils.text import safe_filename_text
 
 
-def rectified_path(base_dir: Path, metadata: DicomMetadata) -> Path:
+def rectified_path(
+    base_dir: Path, metadata: DicomMetadata, *, describe_series: bool = True
+) -> Path:
     """Return the sorted, clearly named path a rectified copy of this file should have.
 
     Folder: <series number, 3 digits>-<series description>
+            (the series number alone when `describe_series` is False, for a
+            sanitisation policy that does not keep the series description)
     File:   <series number>_<instance number, 4 digits>_<SOP instance UID>
             _e<echo number, 2 digits>.dcm
 
@@ -22,7 +26,9 @@ def rectified_path(base_dir: Path, metadata: DicomMetadata) -> Path:
     instance = f"{metadata.instance_number:04d}"
     echo = f"{metadata.echo_number if metadata.echo_number is not None else 1:02d}"
 
-    folder = f"{series}-{safe_filename_text(metadata.series_description)}"
+    folder = (
+        f"{series}-{safe_filename_text(metadata.series_description)}" if describe_series else series
+    )
     sop = safe_filename_text(metadata.sop_instance_uid)
     filename = f"{series}_{instance}_{sop}_e{echo}.dcm"
     return base_dir / folder / filename

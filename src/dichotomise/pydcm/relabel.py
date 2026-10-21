@@ -69,6 +69,10 @@ class Policy:
     actions: dict[str, dict[str, Any]]
     description: str = ""
 
+    def keeps(self, field: str) -> bool:
+        """Whether the policy leaves `field` as it is (a field with no action is kept)."""
+        return bool(self.actions.get(field, {}).get("action", "keep") == "keep")
+
 
 _ACTIONS_REQUIRING_VALUE = {"replace", "add", "add_code_sequence"}
 _VALID_ACTIONS = {

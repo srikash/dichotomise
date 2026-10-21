@@ -73,3 +73,9 @@ def test_with_new_sop_instance_uid_swaps_the_uid_in_the_filename() -> None:
 
     assert renamed.name == "021_0005_9.8.7_e01.dcm"
     assert renamed.parent == path.parent
+
+
+def test_rectified_path_uses_only_the_series_number_when_the_description_is_withheld() -> None:
+    result = rectified_path(Path("/rectified"), _metadata(), describe_series=False)
+
+    assert result.parent == Path("/rectified/021")
