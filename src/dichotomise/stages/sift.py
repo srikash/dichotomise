@@ -14,7 +14,7 @@ class ReviewFile:
     """One file that was not retained, and why."""
 
     metadata: DicomMetadata
-    reason: str  # "duplicate" or "misfiled"
+    reason: str  # "sop_conflict", "duplicate" or "misfiled"
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,9 @@ def sift(audit_result: AuditResult) -> SiftResult:
     retained: list[DicomMetadata] = []
     review: list[ReviewFile] = []
     for file in audit_result.files:
-        if file.is_duplicate:
+        if file.is_sop_conflict:
+            review.append(ReviewFile(file.metadata, "sop_conflict"))
+        elif file.is_duplicate:
             review.append(ReviewFile(file.metadata, "duplicate"))
         elif file.is_misfiled:
             review.append(ReviewFile(file.metadata, "misfiled"))

@@ -377,11 +377,12 @@ def sanitise_file(
     subject_label: str,
     scan_date: str,
     replacement_cache: MutableMapping[str, str],
-) -> None:
+) -> str:
     """Read, sanitise, save, and re-open one DICOM file.
 
     The caller owns path selection and the shared replacement cache; this
-    function owns all DICOM-specific file handling.
+    function owns all DICOM-specific file handling. Returns the saved file's
+    SOP Instance UID, which the policy may have regenerated.
     """
     dataset = pydicom.dcmread(source_path)
     apply_policy(
@@ -393,3 +394,4 @@ def sanitise_file(
     )
     dataset.save_as(target_path)
     pydicom.dcmread(target_path, stop_before_pixels=True)
+    return str(dataset.get("SOPInstanceUID", ""))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
@@ -282,14 +283,7 @@ def test_run_pipeline_archives_review_files_renamed_but_unsanitised(
         SeriesNumber=21,
         InstanceNumber=1,
     )
-    make_dicom_file(
-        source / "021-DWI" / "2.dcm",
-        PatientID="sub-01",
-        StudyInstanceUID="study-a",
-        SeriesInstanceUID="series-a",
-        SeriesNumber=21,
-        InstanceNumber=1,
-    )
+    shutil.copyfile(source / "021-DWI" / "1.dcm", source / "021-DWI" / "2.dcm")
 
     run = run_pipeline(source, tmp_path / "out")
 
@@ -320,15 +314,7 @@ def test_run_pipeline_sanitised_run_deidentifies_review_archive(
         SeriesNumber=21,
         InstanceNumber=1,
     )
-    make_dicom_file(
-        source / "021-DWI" / "2.dcm",
-        PatientID=real_patient_id,
-        PatientName="Doe^Jane",
-        StudyInstanceUID="study-a",
-        SeriesInstanceUID="series-a",
-        SeriesNumber=21,
-        InstanceNumber=1,
-    )
+    shutil.copyfile(source / "021-DWI" / "1.dcm", source / "021-DWI" / "2.dcm")
 
     run = run_pipeline(
         source,
@@ -375,14 +361,7 @@ def test_run_pipeline_writes_manifests_for_retained_and_review_files(
         SeriesNumber=21,
         InstanceNumber=1,
     )
-    make_dicom_file(
-        source / "021-DWI" / "2.dcm",
-        PatientID="sub-01",
-        StudyInstanceUID="study-a",
-        SeriesInstanceUID="series-a",
-        SeriesNumber=21,
-        InstanceNumber=1,
-    )
+    shutil.copyfile(source / "021-DWI" / "1.dcm", source / "021-DWI" / "2.dcm")
 
     run = run_pipeline(source, tmp_path / "out")
 
@@ -431,3 +410,81 @@ def test_run_pipeline_sanitised_reports_never_contain_the_real_patient_id(
 
     for report_file in run.reports_dir.rglob("*.json"):
         assert real_patient_id not in report_file.read_text()
+
+
+def test_run_pipeline_sends_sop_uid_conflicts_to_review_without_failing(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    shared = {
+        "PatientID": "sub-01",
+        "StudyInstanceUID": "1.2.1",
+        "SeriesInstanceUID": "1.2.2",
+        "SeriesNumber": 21,
+        "SOPInstanceUID": "1.2.3.9",
+    }
+    make_dicom_file(source / "021-DWI" / "1.dcm", InstanceNumber=1, **shared)
+    make_dicom_file(source / "021-DWI" / "2.dcm", InstanceNumber=1, ProtocolName="other", **shared)
+    make_dicom_file(
+        source / "021-DWI" / "3.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="1.2.1",
+        SeriesInstanceUID="1.2.2",
+        SeriesNumber=21,
+        InstanceNumber=3,
+    )
+
+    run = run_pipeline(source, tmp_path / "out")
+
+    reports_dir = next(run.reports_dir.iterdir())
+    sift_report = json.loads((reports_dir / "stage-02-report.json").read_text())
+    assert sift_report["retained_count"] == 1
+    assert {item["reason"] for item in sift_report["review"]} == {"sop_conflict"}
+    audit_report = json.loads((reports_dir / "stage-01-report.json").read_text())
+    assert audit_report["sop_conflict_count"] == 2
+    assert audit_report["duplicate_count"] == 0
+    (review_archive,) = run.archives_dir.glob("*_review-archive_*.tar.gz")
+    with tarfile.open(review_archive, "r:gz") as tar:
+        names = sorted(Path(m.name).name for m in tar.getmembers() if m.isfile())
+    assert len(names) == 2
+    assert any("-dup01" in name for name in names)
+
+
+def test_run_pipeline_sanitised_archives_name_files_after_the_regenerated_uid(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    original_uid = "1.3.12.2.1107.5.2.61.237011.20261020110718"
+    source = tmp_path / "export"
+    make_dicom_file(
+        source / "021-DWI" / "1.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="1.2.1",
+        SeriesInstanceUID="1.2.2",
+        SeriesNumber=21,
+        SOPInstanceUID=original_uid,
+    )
+    copy = source / "021-DWI" / "2.dcm"
+    shutil.copyfile(source / "021-DWI" / "1.dcm", copy)
+    make_dicom_file(
+        source / "021-DWI" / "3.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="1.2.1",
+        SeriesInstanceUID="1.2.2",
+        SeriesNumber=21,
+        InstanceNumber=3,
+    )
+
+    run = run_pipeline(
+        source,
+        tmp_path / "out",
+        sanitise_requested=True,
+        label_mode="numerical",
+        subject_id="7",
+    )
+
+    for pattern in ("*_dichotomised-archive_*.tar.gz", "*_review-archive_*.tar.gz"):
+        (archive,) = run.archives_dir.glob(pattern)
+        with tarfile.open(archive, "r:gz") as tar:
+            names = [m.name for m in tar.getmembers() if m.isfile()]
+        assert names
+        assert all(original_uid not in name for name in names)

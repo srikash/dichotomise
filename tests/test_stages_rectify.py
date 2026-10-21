@@ -65,8 +65,8 @@ def test_rectify_copies_retained_files_into_their_agreed_names(tmp_path: Path) -
 
     result = rectify(sift_result)
 
-    expected_a = result.rectified_dir / "021-diffusion" / "021_series-dwi_0001_e01.dcm"
-    expected_b = result.rectified_dir / "021-diffusion" / "021_series-dwi_0002_e01.dcm"
+    expected_a = result.rectified_dir / "021-diffusion" / "021_0001_sop-1_e01.dcm"
+    expected_b = result.rectified_dir / "021-diffusion" / "021_0002_sop-1_e01.dcm"
     assert expected_a.read_bytes() == b"first"
     assert expected_b.read_bytes() == b"second"
     assert {f.path for f in result.files} == {expected_a, expected_b}
@@ -118,7 +118,7 @@ def test_rectify_review_renames_files_using_the_same_naming_scheme(tmp_path: Pat
 
     result = rectify_review(sift_result)
 
-    expected = result.review_rectified_dir / "021-diffusion" / "021_series-dwi_0001_e01.dcm"
+    expected = result.review_rectified_dir / "021-diffusion" / "021_0001_sop-1_e01.dcm"
     assert expected.read_bytes() == b"duplicate content"
     assert [f.path for f in result.files] == [expected]
     assert result.collision_count == 0
@@ -147,6 +147,33 @@ def test_rectify_review_disambiguates_colliding_names_instead_of_raising(tmp_pat
     result = rectify_review(sift_result)
 
     folder = result.review_rectified_dir / "021-diffusion"
-    assert (folder / "021_series-dwi_0001_e01.dcm").read_bytes() == b"first"
-    assert (folder / "021_series-dwi_0001_e01-dup01.dcm").read_bytes() == b"second"
+    assert (folder / "021_0001_sop-1_e01.dcm").read_bytes() == b"first"
+    assert (folder / "021_0001_sop-1_e01-dup01.dcm").read_bytes() == b"second"
     assert result.collision_count == 1
+
+
+def test_rectify_review_writes_a_byte_identical_repeat_only_once(tmp_path: Path) -> None:
+    source_dir = tmp_path / "export"
+    path_a = source_dir / "021-DWI" / "2.dcm"
+    path_a.parent.mkdir(parents=True)
+    path_a.write_bytes(b"same bytes")
+    path_b = source_dir / "021-DWI" / "3.dcm"
+    path_b.write_bytes(b"same bytes")
+
+    subject = _subject(tmp_path / "working" / "sub-01", source_dir)
+    sift_result = SiftResult(
+        subject=subject,
+        retained=[],
+        review=[
+            ReviewFile(_metadata(path_a), "duplicate"),
+            ReviewFile(_metadata(path_b), "duplicate"),
+        ],
+    )
+
+    result = rectify_review(sift_result)
+
+    folder = result.review_rectified_dir / "021-diffusion"
+    assert sorted(p.name for p in folder.iterdir()) == ["021_0001_sop-1_e01.dcm"]
+    assert len(result.files) == 1
+    assert result.collision_count == 0
+    assert result.merged_identical_count == 1

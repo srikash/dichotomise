@@ -12,8 +12,14 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dichotomise.pydcm.acquisition import infer_ti_index, summarise_acquisition
 from dichotomise.pydcm.read import DicomMetadata
-from dichotomise.stages.audit import AuditedFile, AuditResult, metadata_inconsistencies
+from dichotomise.stages.audit import (
+    AuditedFile,
+    AuditResult,
+    describe_findings,
+    metadata_inconsistencies,
+)
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.finalise import FinaliseResult
 from dichotomise.stages.rectify import RectifyResult, RectifyReviewResult
@@ -34,35 +40,39 @@ def _write(reports_dir: Path, filename: str, data: dict[str, object]) -> Path:
     return report_path
 
 
-def _audit_series_rows(audit_result: AuditResult) -> list[dict[str, str | int]]:
+def _audit_series_rows(audit_result: AuditResult) -> list[dict[str, object]]:
     """Summarise structural and metadata findings for each physical DICOM folder."""
     files_by_folder: dict[Path, list[AuditedFile]] = {}
     for audited_file in audit_result.files:
         files_by_folder.setdefault(audited_file.metadata.path.parent, []).append(audited_file)
 
-    rows: list[dict[str, str | int]] = []
+    rows: list[dict[str, object]] = []
     for folder, files in sorted(
         files_by_folder.items(), key=lambda item: (natural_sort_key(item[0].name), item[0])
     ):
         inconsistencies = metadata_inconsistencies(files)
         duplicate_count = sum(file.is_duplicate for file in files)
         misfiled_count = sum(file.is_misfiled for file in files)
+        conflict_count = sum(file.is_sop_conflict for file in files)
+        low_priority = all(f.metadata.modality in {"PR", "SR"} for f in files)
         rows.append(
             {
                 "series_folder": folder.name,
                 "dicom_count": len(files),
                 "duplicate_count": duplicate_count,
                 "misfiled_count": misfiled_count,
+                "sop_conflict_count": conflict_count,
                 "metadata_inconsistencies": "; ".join(inconsistencies),
                 "status": "flagged"
-                if duplicate_count or misfiled_count or inconsistencies
+                if duplicate_count or misfiled_count or conflict_count or inconsistencies
                 else "pass",
+                "notes": describe_findings(files, compact_duplicates=low_priority),
             }
         )
     return rows
 
 
-def _write_audit_csv(reports_dir: Path, rows: list[dict[str, str | int]]) -> Path:
+def _write_audit_csv(reports_dir: Path, rows: list[dict[str, object]]) -> Path:
     """Write the spreadsheet-friendly audit inventory alongside its JSON report."""
     reports_dir.mkdir(parents=True, exist_ok=True)
     report_path = reports_dir / "stage-01-audit.csv"
@@ -71,13 +81,16 @@ def _write_audit_csv(reports_dir: Path, rows: list[dict[str, str | int]]) -> Pat
         "dicom_count",
         "duplicate_count",
         "misfiled_count",
+        "sop_conflict_count",
         "metadata_inconsistencies",
         "status",
+        "notes",
     ]
     with report_path.open("w", newline="") as report_file:
         writer = csv.DictWriter(report_file, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow({**row, "notes": " | ".join(row["notes"])})  # type: ignore[arg-type]
     return report_path
 
 
@@ -105,6 +118,7 @@ def write_audit_report(audit_result: AuditResult, reports_dir: Path, *, subject_
         "total_files": len(audit_result.files),
         "duplicate_count": sum(file.is_duplicate for file in audit_result.files),
         "misfiled_count": sum(file.is_misfiled for file in audit_result.files),
+        "sop_conflict_count": sum(file.is_sop_conflict for file in audit_result.files),
         "duplicates": duplicates,
         "misfiled": misfiled,
         "metadata_inconsistency_count": sum(
@@ -140,6 +154,9 @@ def write_sift_report(
         "review": review,
         "review_rename_collisions": (
             rectify_review_result.collision_count if rectify_review_result is not None else 0
+        ),
+        "review_identical_files_not_rewritten": (
+            rectify_review_result.merged_identical_count if rectify_review_result is not None else 0
         ),
         "review_archive": review_archive.path.name if review_archive is not None else None,
         "review_archive_checksum": (
@@ -219,6 +236,12 @@ def _series_inventory(
     for metadata in rectify_result.files:
         rectified_by_series.setdefault(metadata.series_instance_uid, []).append(metadata)
 
+    final_path_by_rectified = (
+        dict(zip((m.path for m in rectify_result.files), sanitise_result.files, strict=True))
+        if sanitise_result is not None
+        else {}
+    )
+
     inventory: list[tuple[tuple[int, str, str], dict[str, object]]] = []
     for series_uid, source_files in source_by_series.items():
         first_source = min(
@@ -233,30 +256,38 @@ def _series_inventory(
         )
         after_name = None
         if first_rectified is not None:
-            after_file = first_rectified.path
-            if sanitise_result is not None:
-                after_file = sanitise_result.sanitised_dir / first_rectified.path.relative_to(
-                    rectify_result.rectified_dir
-                )
-            after_name = after_file.name
+            after_name = final_path_by_rectified.get(
+                first_rectified.path, first_rectified.path
+            ).name
         metadata = first_source.metadata
-        inventory.append(
-            (
-                (metadata.series_number, metadata.series_description, series_uid),
+        acquisition = summarise_acquisition(rectified_files)
+        entry: dict[str, object] = {
+            "series_number": metadata.series_number,
+            "series_description": metadata.series_description,
+            "series_instance_uid": series_uid,
+            "source_file_count": len(source_files),
+            "archived_file_count": len(rectified_files),
+            "review_file_count": sum(
+                item.is_duplicate or item.is_misfiled or item.is_sop_conflict
+                for item in source_files
+            ),
+            "first_dicom_before": metadata.path.name,
+            "first_dicom_after": after_name,
+        }
+        if acquisition.is_multi_echo_or_ti:
+            ti_index = infer_ti_index(rectified_files)
+            entry["acquisition"] = acquisition.describe()
+            entry["files"] = [
                 {
-                    "series_number": metadata.series_number,
-                    "series_description": metadata.series_description,
-                    "series_instance_uid": series_uid,
-                    "source_file_count": len(source_files),
-                    "archived_file_count": len(rectified_files),
-                    "review_file_count": sum(
-                        item.is_duplicate or item.is_misfiled for item in source_files
-                    ),
-                    "first_dicom_before": metadata.path.name,
-                    "first_dicom_after": after_name,
-                },
-            )
-        )
+                    "file": final_path_by_rectified.get(item.path, item.path).name,
+                    "echo_number": item.echo_number,
+                    "echo_time_ms": item.echo_time,
+                    "asl_context": item.asl_context,
+                    "ti_index_inferred": ti_index.get(item.path),
+                }
+                for item in sorted(rectified_files, key=lambda f: (f.instance_number, f.path.name))
+            ]
+        inventory.append(((metadata.series_number, metadata.series_description, series_uid), entry))
     return [entry for _, entry in sorted(inventory)]
 
 

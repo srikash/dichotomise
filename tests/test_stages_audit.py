@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 
 from dichotomise.pydcm.read import iter_dicom_metadata
-from dichotomise.stages.audit import audit, audit_directory
+from dichotomise.stages.audit import audit, audit_directory, describe_findings, folder_notes
 from dichotomise.stages.capture import CapturedSubject
 
 
@@ -26,7 +27,7 @@ def test_audit_flags_duplicate_and_misfiled_files(
 ) -> None:
     capture_dir = tmp_path / "capture"
 
-    # 021-DWI: files 1 and 2 share content (a duplicate); file 3 is distinct.
+    # 021-DWI: file 2 is a byte-for-byte copy of file 1; file 3 is distinct.
     make_dicom_file(
         capture_dir / "021-DWI" / "1.dcm",
         StudyInstanceUID="study-a",
@@ -35,14 +36,7 @@ def test_audit_flags_duplicate_and_misfiled_files(
         ProtocolName="DWI",
         InstanceNumber=1,
     )
-    make_dicom_file(
-        capture_dir / "021-DWI" / "2.dcm",
-        StudyInstanceUID="study-a",
-        SeriesInstanceUID="series-dwi",
-        SeriesNumber=21,
-        ProtocolName="DWI",
-        InstanceNumber=1,
-    )
+    shutil.copyfile(capture_dir / "021-DWI" / "1.dcm", capture_dir / "021-DWI" / "2.dcm")
     make_dicom_file(
         capture_dir / "021-DWI" / "3.dcm",
         StudyInstanceUID="study-a",
@@ -98,3 +92,83 @@ def test_audit_directory_checks_source_files_in_place(
     assert result.subject.source_root == source_dir
     assert [file.metadata.path for file in result.files] == [dicom_file]
     assert list(source_dir.rglob("*")) == [source_dir / "series", dicom_file]
+
+
+def test_audit_explains_a_folder_written_twice_with_one_misfiled_file(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    # Mirrors an XA60 export: the series is written twice into one folder
+    # (files 5-8 repeat 1-4) and, in the first half, instance 4 of the series
+    # is replaced by a file that belongs to another series (file 4).
+    folder = tmp_path / "ASL_9_MR"
+    series = {
+        "StudyInstanceUID": "1.2.1",
+        "SeriesInstanceUID": "1.2.9",
+        "SeriesNumber": 9,
+        "SeriesDescription": "asl",
+    }
+    for instance in (1, 2, 3):
+        make_dicom_file(
+            folder / f"{instance}.dcm",
+            SOPInstanceUID=f"1.2.9.{instance}",
+            InstanceNumber=instance,
+            ProtocolName="asl",
+            **series,
+        )
+    make_dicom_file(
+        folder / "4.dcm",
+        SOPInstanceUID="1.2.10.2",
+        InstanceNumber=2,
+        ProtocolName="asl",
+        StudyInstanceUID="1.2.1",
+        SeriesInstanceUID="1.2.10",
+        SeriesNumber=10,
+        SeriesDescription="MoCoSeries",
+    )
+    for number in (5, 6, 7):
+        shutil.copyfile(folder / f"{number - 4}.dcm", folder / f"{number}.dcm")
+    make_dicom_file(
+        folder / "8.dcm",
+        SOPInstanceUID="1.2.9.4",
+        InstanceNumber=4,
+        ProtocolName="asl",
+        **series,
+    )
+
+    result = audit(_subject(tmp_path))
+
+    assert {f.metadata.path.name for f in result.files if f.is_duplicate} == {
+        "5.dcm",
+        "6.dcm",
+        "7.dcm",
+    }
+    assert {f.metadata.path.name for f in result.files if f.is_misfiled} == {"4.dcm"}
+    notes = describe_findings([f for f in result.files if f.metadata.path.parent == folder])
+    assert notes == [
+        '4.dcm belongs to series 10 "MoCoSeries" (instance 2), not series 9',
+        "5-7.dcm are byte-identical copies of 1-3.dcm",
+        "8.dcm (instance 4) is kept: its counterpart 4.dcm is misfiled",
+        "SeriesInstanceUID, SeriesNumber, SeriesDescription differ only because of the "
+        "1 misfiled file",
+    ]
+
+
+def test_audit_sends_files_sharing_a_uid_with_different_bytes_to_review_as_conflicts(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "series"
+    shared = {
+        "StudyInstanceUID": "1.2.1",
+        "SeriesInstanceUID": "1.2.2",
+        "SOPInstanceUID": "1.2.3.9",
+    }
+    make_dicom_file(folder / "1.dcm", InstanceNumber=1, **shared)
+    make_dicom_file(folder / "2.dcm", InstanceNumber=2, **shared)
+
+    result = audit(_subject(tmp_path))
+
+    assert all(f.is_sop_conflict and not f.is_duplicate for f in result.files)
+    (note,) = folder_notes(result)
+    assert note.texts == [
+        "1-2.dcm share one SOP Instance UID but their contents differ; all are sent to review"
+    ]

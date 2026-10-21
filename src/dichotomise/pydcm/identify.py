@@ -1,71 +1,81 @@
-"""The two structural checks dichotomise was built for: duplicate and misfiled scan files."""
+"""The structural checks dichotomise was built for: duplicate, conflicting and misfiled files."""
 
 from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from pathlib import Path
 from typing import TypeVar
 
-import pydicom
-
 from dichotomise.pydcm.read import DicomMetadata
-
-# Fields expected to differ between an original file and a copy of the same
-# scan content: excluding them from the hash lets duplicate detection catch
-# copies even when the scanner (or a copy process) assigned the copy a new
-# unique ID.
-_IGNORED_FOR_CONTENT_HASH = {
-    "SOPInstanceUID",
-    "MediaStorageSOPInstanceUID",
-    "InstanceCreationDate",
-    "InstanceCreationTime",
-}
+from dichotomise.utils.text import natural_sort_key
 
 
-def content_hash(path: Path) -> str:
-    """A fingerprint that is identical for two files holding the same scan content.
-
-    Deliberately ignores each file's own unique ID and creation time, so a
-    file that was copied and re-saved with a new ID is still recognised as
-    the same underlying scan.
-    """
-    dataset = pydicom.dcmread(path, force=False)
-    parts: list[str] = []
-    for element in dataset:
-        if element.tag.group == 0x0002 or element.keyword in _IGNORED_FOR_CONTENT_HASH:
-            continue
-        if element.keyword == "PixelData":
-            continue
-        value = str(element.value)
-        parts.append(f"{element.tag}|{element.keyword}|{value}")
-    parts.sort()
-
+def file_digest(path: Path, cache: MutableMapping[Path, str] | None = None) -> str:
+    """SHA-256 of the file's raw bytes: equal only for byte-for-byte copies."""
+    if cache is not None and path in cache:
+        return cache[path]
     hasher = hashlib.sha256()
-    for part in parts:
-        hasher.update(part.encode("utf-8", "replace"))
-    pixel_data = getattr(dataset, "PixelData", None)
-    if pixel_data is not None:
-        hasher.update(hashlib.sha256(pixel_data).digest())
-    return hasher.hexdigest()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            hasher.update(chunk)
+    digest = hasher.hexdigest()
+    if cache is not None:
+        cache[path] = digest
+    return digest
+
+
+def find_duplicate_pairs(
+    paths: Sequence[Path], cache: MutableMapping[Path, str] | None = None
+) -> dict[Path, Path]:
+    """Map each byte-for-byte copy to the original it repeats.
+
+    Only files with identical bytes count: a file that shares its SOP
+    Instance UID or scan content but differs in any byte is not a duplicate.
+    The first file in natural filename order (`2.dcm` before `10.dcm`) is the
+    original; every later identical file is mapped to it.
+    """
+    by_size: dict[int, list[Path]] = {}
+    for path in paths:
+        by_size.setdefault(path.stat().st_size, []).append(path)
+    pairs: dict[Path, Path] = {}
+    for same_size in by_size.values():
+        if len(same_size) < 2:
+            continue
+        originals: dict[str, Path] = {}
+        for path in sorted(same_size, key=lambda item: natural_sort_key(item.name)):
+            digest = file_digest(path, cache)
+            if digest in originals:
+                pairs[path] = originals[digest]
+            else:
+                originals[digest] = path
+    return pairs
 
 
 def find_duplicate_files(paths: Sequence[Path]) -> set[Path]:
-    """Given files known to sit in the same folder, return the ones that repeat earlier content.
+    """Given files known to sit in the same folder, return the byte-for-byte copies."""
+    return set(find_duplicate_pairs(paths))
 
-    The first file (by filename) in a matching group is treated as the
-    original; every later file with the same content is a duplicate.
+
+def find_sop_conflicts(
+    files: Sequence[DicomMetadata], cache: MutableMapping[Path, str] | None = None
+) -> set[Path]:
+    """Return files that share a SOP Instance UID with a file whose bytes differ.
+
+    A SOP Instance UID names exactly one file. Two files that claim the same
+    one but differ are a metadata error, not a duplicate, so every file in
+    such a group is returned.
     """
-    seen_hashes: set[str] = set()
-    duplicates: set[Path] = set()
-    for path in sorted(paths, key=lambda item: item.name):
-        digest = content_hash(path)
-        if digest in seen_hashes:
-            duplicates.add(path)
-        else:
-            seen_hashes.add(digest)
-    return duplicates
+    by_uid: dict[str, list[Path]] = {}
+    for item in files:
+        if item.sop_instance_uid:
+            by_uid.setdefault(item.sop_instance_uid, []).append(item.path)
+    conflicts: set[Path] = set()
+    for group in by_uid.values():
+        if len(group) > 1 and len({file_digest(path, cache) for path in group}) > 1:
+            conflicts.update(group)
+    return conflicts
 
 
 _T = TypeVar("_T")

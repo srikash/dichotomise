@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from dichotomise.errors import NamingCollisionError
-from dichotomise.pydcm.identify import content_hash
+from dichotomise.pydcm.identify import file_digest
 from dichotomise.pydcm.naming import rectified_path
 from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.stages.capture import CapturedSubject
@@ -42,9 +42,7 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
 
     for metadata in sift_result.retained:
         target = rectified_path(rectified_dir, metadata)
-        if target in occupied and content_hash(occupied[target].path) != content_hash(
-            metadata.path
-        ):
+        if target in occupied and file_digest(occupied[target].path) != file_digest(metadata.path):
             raise NamingCollisionError(
                 f"Two different scan files would both be named {target.name}: "
                 f"{occupied[target].path} and {metadata.path}"
@@ -64,27 +62,36 @@ class RectifyReviewResult:
     review_rectified_dir: Path
     files: list[DicomMetadata]
     collision_count: int
+    merged_identical_count: int = 0
 
 
 def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
     """Copy every review file into its rectified name, tolerating collisions.
 
     Uses the same naming as rectify() so a reviewer can see immediately
-    which series/instance a review file's metadata claims to belong to —
+    which series/instance a review file's metadata claims to belong to --
     including when that claim is wrong (misfiled) or shared with another
-    file (duplicate). A genuine name collision does not stop the run here:
-    the colliding file keeps a disambiguated name (`-dup01`, `-dup02`, ...)
-    instead of being silently dropped or overwritten.
+    file (duplicate). A byte-identical file that lands on a name already
+    written is the same file again, so it is not written a second time
+    (`merged_identical_count` counts them). A name shared by files that
+    differ keeps a disambiguated name (`-dup01`, `-dup02`, ...) instead of
+    being silently dropped or overwritten.
     """
     review_rectified_dir = sift_result.subject.working_dir / "review-rectify"
-    occupied: dict[Path, int] = {}
+    written: dict[Path, list[Path]] = {}
     files: list[DicomMetadata] = []
     collision_count = 0
+    merged_identical_count = 0
 
     for item in sift_result.review:
         target = rectified_path(review_rectified_dir, item.metadata)
-        occurrence = occupied.get(target, 0)
-        occupied[target] = occurrence + 1
+        digest = file_digest(item.metadata.path)
+        previous = written.setdefault(target, [])
+        if any(file_digest(path) == digest for path in previous):
+            merged_identical_count += 1
+            continue
+        occurrence = len(previous)
+        previous.append(item.metadata.path)
         if occurrence:
             collision_count += 1
             target = target.with_name(f"{target.stem}-dup{occurrence:02d}{target.suffix}")
@@ -93,5 +100,8 @@ def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
         files.append(replace(item.metadata, path=target))
 
     return RectifyReviewResult(
-        review_rectified_dir=review_rectified_dir, files=files, collision_count=collision_count
+        review_rectified_dir=review_rectified_dir,
+        files=files,
+        collision_count=collision_count,
+        merged_identical_count=merged_identical_count,
     )

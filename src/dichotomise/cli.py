@@ -18,6 +18,7 @@ import rich_click as click
 import rich_click.rich_click as rich_click_config
 from rich.console import Group
 from rich.live import Live
+from rich.markup import escape
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
@@ -31,6 +32,7 @@ from dichotomise.stages.audit import (
     AuditedFile,
     AuditResult,
     audit_directory,
+    folder_notes,
     metadata_inconsistencies,
 )
 from dichotomise.utils.archive import pigz_path
@@ -284,9 +286,13 @@ def _audit_reasons(files: list[AuditedFile]) -> list[str]:
     reasons = [f"{field} varies" for field in metadata_inconsistencies(files)]
     duplicate_count = sum(file.is_duplicate for file in files)
     misfiled_count = sum(file.is_misfiled for file in files)
+    conflict_count = sum(file.is_sop_conflict for file in files)
     if duplicate_count:
         suffix = "file" if duplicate_count == 1 else "files"
         reasons.append(f"{duplicate_count} duplicate {suffix}")
+    if conflict_count:
+        suffix = "file" if conflict_count == 1 else "files"
+        reasons.append(f"{conflict_count} SOP-UID conflict {suffix}")
     if misfiled_count:
         suffix = "file" if misfiled_count == 1 else "files"
         reasons.append(f"{misfiled_count} misfiled {suffix}")
@@ -323,6 +329,19 @@ def _print_audit_table(audit_result: AuditResult) -> None:
             "; ".join(reasons) if reasons else "—",
         )
     console.print(table)
+    _print_audit_notes(audit_result)
+
+
+def _print_audit_notes(audit_result: AuditResult) -> None:
+    """Explain the table's findings in plain language, series folder by series folder."""
+    notes = folder_notes(audit_result)
+    if not notes:
+        return
+    console.print("\n[bold]NOTES[/]")
+    for note in notes:
+        console.print(f"[bold]{escape(note.folder)}[/]")
+        for text in note.texts:
+            console.print(f"  - {escape(text)}")
 
 
 def _report_value(report: dict[str, object], key: str) -> str:

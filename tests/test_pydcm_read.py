@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+import pydicom
 import pytest
 
 from dichotomise.errors import NotDicomError
-from dichotomise.pydcm.read import iter_dicom_files, read_metadata
+from dichotomise.pydcm.read import _optional_number, iter_dicom_files, read_metadata
 
 
 def test_read_metadata_extracts_expected_fields(
@@ -53,3 +54,56 @@ def test_iter_dicom_files_finds_only_dicom_files_recursively(
     found = set(iter_dicom_files(tmp_path))
 
     assert found == {dicom_a, dicom_b}
+
+
+def test_read_metadata_takes_echo_and_asl_context_from_per_frame_groups(
+    tmp_path: Path, make_multiframe_dicom_file: Callable[..., Path]
+) -> None:
+    path = make_multiframe_dicom_file(
+        tmp_path / "1.dcm", echo=2, echo_time=24.6, asl_context="CONTROL", AcquisitionNumber=3
+    )
+
+    metadata = read_metadata(path)
+
+    assert metadata.echo_number == 2
+    assert metadata.echo_time == 24.6
+    assert metadata.asl_context == "CONTROL"
+    assert metadata.acquisition_number == 3
+    assert metadata.number_of_frames == 2
+    assert metadata.mixed_echoes is False
+
+
+def test_read_metadata_flags_a_file_holding_more_than_one_echo(
+    tmp_path: Path, make_multiframe_dicom_file: Callable[..., Path]
+) -> None:
+    path = make_multiframe_dicom_file(tmp_path / "1.dcm", echo=1)
+    dataset = pydicom.dcmread(path)
+    dataset.PerFrameFunctionalGroupsSequence[1].MREchoSequence[0].EchoNumbers = 2
+    dataset.save_as(path)
+
+    metadata = read_metadata(path)
+
+    assert metadata.mixed_echoes is True
+    assert metadata.echo_number is None
+
+
+def test_optional_number_returns_none_instead_of_raising_on_malformed_values() -> None:
+    assert _optional_number("n/a", float) is None
+    assert _optional_number(["1", "2"], int) is None
+    assert _optional_number("", int) is None
+    assert _optional_number("24.6", float) == 24.6
+
+
+def test_read_metadata_reads_a_single_inversion_time_from_the_shared_groups(
+    tmp_path: Path, make_multiframe_dicom_file: Callable[..., Path]
+) -> None:
+    path = make_multiframe_dicom_file(tmp_path / "1.dcm")
+    dataset = pydicom.dcmread(path)
+    modifier = pydicom.Dataset()
+    modifier.InversionTimes = [800.0]
+    shared = pydicom.Dataset()
+    shared.MRModifierSequence = [modifier]
+    dataset.SharedFunctionalGroupsSequence = [shared]
+    dataset.save_as(path)
+
+    assert read_metadata(path).inversion_time == 800.0

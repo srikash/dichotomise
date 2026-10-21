@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from dichotomise.errors import NoDicomFilesFoundError
-from dichotomise.pydcm.identify import find_duplicate_files, find_misfiled_files
+from dichotomise.pydcm.acquisition import summarise_acquisition
+from dichotomise.pydcm.identify import find_duplicate_pairs, find_misfiled_files, find_sop_conflicts
 from dichotomise.pydcm.read import DicomMetadata, iter_dicom_metadata
 from dichotomise.stages.capture import CapturedSubject
+from dichotomise.utils.text import natural_sort_key
 
 _CONSISTENCY_FIELDS: tuple[tuple[str, str], ...] = (
     ("PatientID", "patient_id"),
@@ -27,11 +29,18 @@ _CONSISTENCY_FIELDS: tuple[tuple[str, str], ...] = (
 
 @dataclass(frozen=True)
 class AuditedFile:
-    """One file's scan metadata, plus the two structural checks run against it."""
+    """One file's scan metadata, plus the structural checks run against it.
+
+    `is_duplicate` means a byte-for-byte copy of `duplicate_of`.
+    `is_sop_conflict` means the SOP Instance UID is shared with a file whose
+    bytes differ: a metadata error, never counted as a duplicate.
+    """
 
     metadata: DicomMetadata
     is_duplicate: bool
     is_misfiled: bool
+    is_sop_conflict: bool = False
+    duplicate_of: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -52,15 +61,17 @@ def metadata_inconsistencies(files: Sequence[AuditedFile]) -> list[str]:
 
 
 def audit(subject: CapturedSubject) -> AuditResult:
-    """Check a captured subject's files for duplicates and files in the wrong folder.
+    """Check a captured subject's files for duplicates, UID conflicts and misfiled files.
 
     Runs against `subject.files` as capture() found them in place -- no
     directory is re-scanned here.
 
-    Both checks are computed per physical folder: a folder's own files
-    decide, by majority, what series that folder is supposed to contain
-    (see pydcm.identify.find_misfiled_files), and duplicate content is only
-    compared between files that already sit in the same folder.
+    Misfiled and duplicate checks are computed per physical folder: a
+    folder's own files decide, by majority, what series that folder is
+    supposed to contain (see pydcm.identify.find_misfiled_files), and
+    duplicates (byte-for-byte copies) are only looked for between files that
+    already sit in the same folder. SOP Instance UID conflicts are checked
+    across the whole subject.
     """
     return _audit_files(subject.files, subject)
 
@@ -98,18 +109,268 @@ def _audit_files(files: Sequence[DicomMetadata], subject: CapturedSubject) -> Au
     if not metadata_by_path:
         raise NoDicomFilesFoundError(f"No DICOM files were found for subject {subject.subject_id}")
 
-    duplicates: set[Path] = set()
+    digests: dict[Path, str] = {}
+    sop_conflicts = find_sop_conflicts(files, digests)
+
+    duplicate_of: dict[Path, Path] = {}
     for paths in files_by_folder.values():
-        duplicates |= find_duplicate_files(paths)
+        # A byte-identical copy always shares its SOP Instance UID, so only
+        # files whose UID repeats in the folder can possibly be copies.
+        uid_counts = Counter(metadata_by_path[path].sop_instance_uid for path in paths)
+        candidates = [
+            path
+            for path in paths
+            if path not in sop_conflicts and uid_counts[metadata_by_path[path].sop_instance_uid] > 1
+        ]
+        duplicate_of.update(find_duplicate_pairs(candidates, digests))
 
     misfiled = find_misfiled_files(metadata_by_folder)
 
     audited_files = [
         AuditedFile(
             metadata=metadata,
-            is_duplicate=path in duplicates,
+            is_duplicate=path in duplicate_of,
             is_misfiled=path in misfiled,
+            is_sop_conflict=path in sop_conflicts,
+            duplicate_of=duplicate_of.get(path),
         )
         for path, metadata in sorted(metadata_by_path.items())
     ]
     return AuditResult(subject=subject, files=audited_files)
+
+
+_LOW_PRIORITY_MODALITIES = frozenset({"PR", "SR"})
+_MAX_LISTED = 3
+
+
+@dataclass(frozen=True)
+class FolderNote:
+    """Plain-language findings for one physical folder.
+
+    `low_priority` marks folders of presentation states / structured reports,
+    which downstream steps do not depend on, so their notes are listed last.
+    """
+
+    folder: str
+    texts: list[str]
+    low_priority: bool
+
+
+def _stem_number(path: Path) -> int | None:
+    return int(path.stem) if path.stem.isdecimal() else None
+
+
+def _span(numbers: Sequence[int]) -> str:
+    """Compress sorted integers into runs, e.g. [1, 2, 3, 7] -> "1-3, 7"."""
+    runs: list[list[int]] = []
+    for number in sorted(set(numbers)):
+        if runs and number == runs[-1][1] + 1:
+            runs[-1][1] = number
+        else:
+            runs.append([number, number])
+    return ", ".join(str(lo) if lo == hi else f"{lo}-{hi}" for lo, hi in runs)
+
+
+def _file_span(paths: Sequence[Path]) -> str:
+    """Name files compactly: "400.dcm", "401-799.dcm", or listed names if not numbered."""
+    numbers = [_stem_number(path) for path in paths]
+    if all(number is not None for number in numbers):
+        suffix = paths[0].suffix
+        return f"{_span([n for n in numbers if n is not None])}{suffix}"
+    names = sorted(path.name for path in paths)
+    shown = ", ".join(names[:_MAX_LISTED])
+    return shown + (f" and {len(names) - _MAX_LISTED} more" if len(names) > _MAX_LISTED else "")
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    return singular if count == 1 else plural
+
+
+def _misfiled_notes(files: Sequence[AuditedFile]) -> list[str]:
+    misfiled = [file for file in files if file.is_misfiled]
+    if not misfiled:
+        return []
+    belonging = [f.metadata.series_number for f in files if not f.is_misfiled]
+    if not belonging:
+        return [
+            f"{_file_span([f.metadata.path for f in misfiled])} do not agree on one series, "
+            "so none could be taken as the folder's series"
+        ]
+    dominant = max(set(belonging), key=belonging.count)
+    groups: dict[tuple[int, str], list[AuditedFile]] = {}
+    for file in misfiled:
+        key = (file.metadata.series_number, file.metadata.series_description)
+        groups.setdefault(key, []).append(file)
+    notes: list[str] = []
+    for (number, description), members in sorted(groups.items()):
+        paths = [member.metadata.path for member in members]
+        instances = {member.metadata.instance_number for member in members}
+        verb = _plural(len(paths), "belongs", "belong")
+        text = (
+            f'{_file_span(paths)} {verb} to series {number} "{description}" '
+            f"({_plural(len(instances), 'instance', 'instances')} {_span(sorted(instances))})"
+        )
+        if number != dominant:
+            text += f", not series {dominant}"
+        else:
+            text += (
+                ", but disagree with the rest of the folder in SeriesInstanceUID or ProtocolName"
+            )
+        notes.append(text)
+    return notes
+
+
+def _duplicate_runs(duplicates: dict[Path, Path]) -> tuple[list[str], int | None]:
+    """Describe duplicate->original pairs as runs; also return the typical filename offset."""
+    numbered = sorted(
+        (dup_number, orig_number)
+        for dup, orig in duplicates.items()
+        if (dup_number := _stem_number(dup)) is not None
+        and (orig_number := _stem_number(orig)) is not None
+    )
+    runs: list[list[tuple[int, int]]] = []
+    for pair in numbered:
+        if runs and pair[0] == runs[-1][-1][0] + 1 and pair[1] == runs[-1][-1][1] + 1:
+            runs[-1].append(pair)
+        else:
+            runs.append([pair])
+    texts = []
+    for run in runs[:_MAX_LISTED]:
+        (dup_lo, orig_lo), (dup_hi, orig_hi) = run[0], run[-1]
+        if len(run) == 1:
+            texts.append(f"{dup_lo}.dcm is a byte-identical copy of {orig_lo}.dcm")
+        else:
+            texts.append(
+                f"{dup_lo}-{dup_hi}.dcm are byte-identical copies of {orig_lo}-{orig_hi}.dcm"
+            )
+    if len(runs) > _MAX_LISTED:
+        hidden = sum(len(run) for run in runs[_MAX_LISTED:])
+        texts.append(f"and {hidden} more byte-identical {_plural(hidden, 'copy', 'copies')}")
+    unnumbered = len(duplicates) - len(numbered)
+    if unnumbered:
+        texts.append(
+            f"{unnumbered} other {_plural(unnumbered, 'file is a', 'files are')} byte-identical "
+            f"{_plural(unnumbered, 'copy', 'copies')} of earlier files"
+        )
+    longest = max(runs, key=len)[0] if runs else None
+    return texts, (longest[0] - longest[1]) if longest else None
+
+
+def _duplicate_notes(files: Sequence[AuditedFile], *, compact: bool) -> list[str]:
+    duplicates = {
+        f.metadata.path: f.duplicate_of for f in files if f.is_duplicate and f.duplicate_of
+    }
+    if not duplicates:
+        return []
+    count = len(duplicates)
+    if compact:
+        written_twice = 2 * count == len(files)
+        return [
+            f"{count} byte-identical duplicate {_plural(count, 'file', 'files')}"
+            + (" (the folder's contents are written twice)" if written_twice else "")
+        ]
+    texts, offset = _duplicate_runs(duplicates)
+    notes = []
+    prefix = "The folder's contents are written twice: " if 2 * count == len(files) else ""
+    notes.append(prefix + "; ".join(texts))
+
+    first_dup = min((n for n in map(_stem_number, duplicates) if n is not None), default=None)
+    if first_dup is None or offset is None:
+        return notes
+    by_number = {_stem_number(f.metadata.path): f for f in files}
+    kept: list[str] = []
+    for file in files:
+        number = _stem_number(file.metadata.path)
+        if file.is_duplicate or file.is_misfiled or file.is_sop_conflict or number is None:
+            continue
+        if number <= first_dup:
+            continue
+        counterpart = by_number.get(number - offset)
+        if counterpart is None:
+            kept.append(
+                f"{file.metadata.path.name} (instance {file.metadata.instance_number}) "
+                "has no counterpart"
+            )
+        elif counterpart.is_misfiled:
+            kept.append(
+                f"{file.metadata.path.name} (instance {file.metadata.instance_number}) is kept: "
+                f"its counterpart {counterpart.metadata.path.name} is misfiled"
+            )
+    if kept:
+        notes.append(
+            "; ".join(kept[:_MAX_LISTED])
+            + (f"; and {len(kept) - _MAX_LISTED} more" if len(kept) > _MAX_LISTED else "")
+        )
+    return notes
+
+
+def _conflict_notes(files: Sequence[AuditedFile]) -> list[str]:
+    groups: dict[str, list[Path]] = {}
+    for file in files:
+        if file.is_sop_conflict:
+            groups.setdefault(file.metadata.sop_instance_uid, []).append(file.metadata.path)
+    notes = [
+        f"{_file_span(paths)} share one SOP Instance UID but their contents differ; "
+        "all are sent to review"
+        for paths in list(groups.values())[:_MAX_LISTED]
+    ]
+    if len(groups) > _MAX_LISTED:
+        notes.append(f"and {len(groups) - _MAX_LISTED} more SOP Instance UID conflicts")
+    return notes
+
+
+def _inconsistency_notes(files: Sequence[AuditedFile]) -> list[str]:
+    full = metadata_inconsistencies(files)
+    if not full:
+        return []
+    rest = [file for file in files if not file.is_misfiled]
+    remaining = metadata_inconsistencies(rest) if rest and len(rest) < len(files) else full
+    explained = [label for label in full if label not in remaining]
+    notes = []
+    if explained:
+        count = len(files) - len(rest)
+        notes.append(
+            f"{', '.join(explained)} differ only because of the {count} misfiled "
+            f"{_plural(count, 'file', 'files')}"
+        )
+    if remaining:
+        notes.append(f"{', '.join(remaining)} differ between files in this folder")
+    return notes
+
+
+def describe_findings(
+    files: Sequence[AuditedFile], *, compact_duplicates: bool = False
+) -> list[str]:
+    """Explain, in short sentences, what the checks found in one folder."""
+    notes = _misfiled_notes(files)
+    notes += _duplicate_notes(files, compact=compact_duplicates)
+    notes += _conflict_notes(files)
+    notes += _inconsistency_notes(files)
+    mixed = sum(file.metadata.mixed_echoes for file in files)
+    if mixed:
+        notes.append(
+            f"{mixed} {_plural(mixed, 'file holds', 'files hold')} more than one echo; "
+            "their names use e01"
+        )
+    kept = [f.metadata for f in files if not (f.is_duplicate or f.is_misfiled or f.is_sop_conflict)]
+    if kept:
+        acquisition = summarise_acquisition(kept)
+        if acquisition.is_multi_echo_or_ti:
+            notes.append(f"Acquisition: {acquisition.describe()}")
+    return notes
+
+
+def folder_notes(audit_result: AuditResult) -> list[FolderNote]:
+    """Notes for every folder that has any, imaging series first, PR/SR folders last."""
+    files_by_folder: dict[Path, list[AuditedFile]] = defaultdict(list)
+    for file in audit_result.files:
+        files_by_folder[file.metadata.path.parent].append(file)
+    result = []
+    for folder, files in sorted(
+        files_by_folder.items(), key=lambda item: (natural_sort_key(item[0].name), item[0])
+    ):
+        low_priority = all(f.metadata.modality in _LOW_PRIORITY_MODALITIES for f in files)
+        texts = describe_findings(files, compact_duplicates=low_priority)
+        if texts:
+            result.append(FolderNote(folder.name, texts, low_priority))
+    return sorted(result, key=lambda note: note.low_priority)

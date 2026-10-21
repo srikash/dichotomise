@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.7.0
+
+**Breaking: rectified filenames change.** Files are now named
+`<series>_<instance>_<SOPInstanceUID>_e<echo>.dcm` (previously
+`<series>_<SeriesInstanceUID>_<instance>_e<echo>.dcm`). The SOP Instance UID is unique per file, so
+names no longer rely on instance numbers. With `--sanitise`, files are renamed after their UID is
+regenerated, so the filename matches the header and no longer carries the original UID.
+
+- A duplicate is now strictly a byte-for-byte copy. Previously a file was a duplicate if its parsed
+  content matched another file's, ignoring its SOP Instance UID and creation time. A re-saved copy
+  with a new UID is therefore no longer reported as a duplicate.
+- Files that share a SOP Instance UID but differ in bytes are no longer treated as duplicates. They
+  go to review with reason `sop_conflict`, and the run continues.
+- The duplicate you keep is the numerically first file (`2.dcm` before `10.dcm`), not the first in
+  string order.
+- A NOTES section follows the audit table and is written to `stage-01-report.json` (`notes`) and
+  `stage-01-audit.csv` (`notes`, `sop_conflict_count`). It names the file that belongs to another
+  series, which files repeat which, and why series metadata varies.
+- Enhanced (multi-frame) MR: the echo number and time are read from the per-frame groups, so
+  multi-echo files are no longer all named `_e01`. Each series now reports echoes, ASL
+  label/control and an inferred TI index (stage-03 report `series_inventory`). The TI is inferred
+  from acquisition order only, and only when the headers state no inversion time.
+- Byte-identical files that land on one name in the review tree are written once instead of
+  getting `-dupNN` names (`review_identical_files_not_rewritten` in `stage-02-report.json`).
+- `stage-01-audit.csv` gains `sop_conflict_count` and `notes` columns.
+
 ## v2.6.5
 
 - Archive creation (source, dichotomised, and review archives) now prefers `pigz` for gzip compression when it's on PATH -- parallel across CPU cores, versus the single-threaded stdlib `gzip`/`zlib` codec used otherwise. The CLI reports "pigz found, using it." up front when it's available.

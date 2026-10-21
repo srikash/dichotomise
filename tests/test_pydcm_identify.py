@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import shutil
 from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from dichotomise.pydcm.identify import content_hash, find_duplicate_files, find_misfiled_files
+from dichotomise.pydcm.identify import (
+    file_digest,
+    find_duplicate_files,
+    find_duplicate_pairs,
+    find_misfiled_files,
+    find_sop_conflicts,
+)
 from dichotomise.pydcm.read import DicomMetadata, iter_dicom_files, read_metadata
 
 DATA_DIR = (
@@ -39,62 +46,70 @@ def _metadata(path: Path, **overrides: object) -> DicomMetadata:
     return DicomMetadata(**defaults)  # type: ignore[arg-type]
 
 
-def test_content_hash_matches_for_the_same_scan_content_with_a_different_unique_id(
+def test_file_digest_matches_only_for_byte_identical_files(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
-    # A real duplicate is the same scan (same study/series) re-saved with a
-    # new per-file ID, not a file from an unrelated series.
-    shared_series_uid = "1.2.840.10008.5.1.4.1.1.4.99"
-    shared_study_uid = "1.2.3"
-    first = make_dicom_file(
-        tmp_path / "1.dcm",
-        StudyInstanceUID=shared_study_uid,
-        SeriesInstanceUID=shared_series_uid,
-        SeriesNumber=21,
-        InstanceNumber=1,
-    )
-    second = make_dicom_file(
-        tmp_path / "2.dcm",
-        StudyInstanceUID=shared_study_uid,
-        SeriesInstanceUID=shared_series_uid,
-        SeriesNumber=21,
-        InstanceNumber=1,
-    )
+    original = make_dicom_file(tmp_path / "1.dcm")
+    copy = tmp_path / "2.dcm"
+    shutil.copyfile(original, copy)
 
-    assert content_hash(first) == content_hash(second)
+    assert file_digest(original) == file_digest(copy)
 
 
-def test_content_hash_differs_for_genuinely_different_scan_content(
+def test_file_digest_differs_when_only_the_sop_instance_uid_differs(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
-    first = make_dicom_file(tmp_path / "1.dcm", InstanceNumber=1)
-    second = make_dicom_file(tmp_path / "2.dcm", InstanceNumber=2)
+    # Same scan content, but a new unique ID: not a byte-for-byte copy.
+    shared = {"StudyInstanceUID": "1.2.3", "SeriesInstanceUID": "1.2.4", "InstanceNumber": 1}
+    first = make_dicom_file(tmp_path / "1.dcm", **shared)
+    second = make_dicom_file(tmp_path / "2.dcm", **shared)
 
-    assert content_hash(first) != content_hash(second)
+    assert file_digest(first) != file_digest(second)
 
 
-def test_find_duplicate_files_flags_the_later_copy_of_repeated_content(
+def test_find_duplicate_files_flags_only_byte_identical_later_copies(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
-    shared_series_uid = "1.2.840.10008.5.1.4.1.1.4.99"
-    shared_study_uid = "1.2.3"
-    original = make_dicom_file(
-        tmp_path / "1.dcm",
-        StudyInstanceUID=shared_study_uid,
-        SeriesInstanceUID=shared_series_uid,
-        InstanceNumber=1,
-    )
-    repeat = make_dicom_file(
-        tmp_path / "2.dcm",
-        StudyInstanceUID=shared_study_uid,
-        SeriesInstanceUID=shared_series_uid,
-        InstanceNumber=1,
-    )
-    different = make_dicom_file(tmp_path / "3.dcm", InstanceNumber=2)
+    original = make_dicom_file(tmp_path / "1.dcm")
+    repeat = tmp_path / "2.dcm"
+    shutil.copyfile(original, repeat)
+    resaved_with_new_uid = make_dicom_file(tmp_path / "3.dcm")
+    different = make_dicom_file(tmp_path / "4.dcm", InstanceNumber=2)
 
-    duplicates = find_duplicate_files([original, repeat, different])
+    duplicates = find_duplicate_files([original, repeat, resaved_with_new_uid, different])
 
     assert duplicates == {repeat}
+
+
+def test_find_duplicate_pairs_keeps_the_numerically_first_file_as_the_original(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    ten = make_dicom_file(tmp_path / "10.dcm")
+    two = tmp_path / "2.dcm"
+    shutil.copyfile(ten, two)
+
+    assert find_duplicate_pairs([ten, two]) == {ten: two}
+
+
+def test_find_sop_conflicts_flags_every_file_sharing_a_uid_with_different_bytes(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    first = make_dicom_file(tmp_path / "1.dcm", SOPInstanceUID="1.2.3.9", InstanceNumber=1)
+    second = make_dicom_file(tmp_path / "2.dcm", SOPInstanceUID="1.2.3.9", InstanceNumber=2)
+    unrelated = make_dicom_file(tmp_path / "3.dcm")
+    files = [read_metadata(path) for path in (first, second, unrelated)]
+
+    assert find_sop_conflicts(files) == {first, second}
+
+
+def test_find_sop_conflicts_ignores_a_byte_identical_repeat(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    original = make_dicom_file(tmp_path / "1.dcm")
+    repeat = tmp_path / "2.dcm"
+    shutil.copyfile(original, repeat)
+
+    assert find_sop_conflicts([read_metadata(original), read_metadata(repeat)]) == set()
 
 
 def test_find_misfiled_files_flags_a_file_that_disagrees_with_its_folder() -> None:

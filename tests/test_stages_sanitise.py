@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pydicom
 
+from dichotomise.pydcm.read import read_metadata
 from dichotomise.pydcm.relabel import load_policy
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.rectify import RectifyResult, RectifyReviewResult
@@ -182,3 +183,33 @@ def test_sanitise_review_shares_replacement_cache_with_retained_sanitise(
     review_written = pydicom.dcmread(review_result.files[0], force=True)
     assert retained_written.StudyInstanceUID == review_written.StudyInstanceUID
     assert retained_written.StudyInstanceUID != "shared-study"
+
+
+def test_sanitise_renames_files_so_the_filename_matches_the_regenerated_sop_uid(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    original_uid = "1.3.12.2.1107.5.2.61.237011.20261020110718"
+    rectified_dir = tmp_path / "rectify"
+    source = make_dicom_file(
+        rectified_dir / "021-DWI" / f"021_0001_{original_uid}_e01.dcm",
+        SOPInstanceUID=original_uid,
+        InstanceNumber=1,
+    )
+    metadata = read_metadata(source)
+    rectify_result = RectifyResult(
+        subject=_subject(tmp_path), rectified_dir=rectified_dir, files=[metadata]
+    )
+
+    result = sanitise(
+        rectify_result,
+        policy=load_policy("standard"),
+        subject_label="sub-0001",
+        replacement_cache={},
+    )
+
+    (output,) = result.files
+    new_uid = read_metadata(output).sop_instance_uid
+    assert new_uid != original_uid
+    assert output.name == f"021_0001_{new_uid}_e01.dcm"
+    assert original_uid not in output.name
+    assert [p.name for p in output.parent.iterdir()] == [output.name]

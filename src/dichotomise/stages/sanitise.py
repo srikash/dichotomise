@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from dichotomise.pydcm.naming import with_new_sop_instance_uid
 from dichotomise.pydcm.relabel import Policy, sanitise_file
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.rectify import RectifyResult, RectifyReviewResult
@@ -18,6 +19,20 @@ class SanitiseResult:
     subject_label: str
     sanitised_dir: Path
     files: list[Path]
+
+
+def _renamed_for_uid(target: Path, old_uid: str, new_uid: str) -> Path:
+    """Rename a sanitised file if its SOP Instance UID was regenerated.
+
+    Keeps the filename equal to the header and stops the original UID (which
+    Siemens builds from the acquisition timestamp) surviving in a filename.
+    """
+    if not old_uid or not new_uid or new_uid == old_uid:
+        return target
+    renamed = with_new_sop_instance_uid(target, old_uid, new_uid)
+    if renamed != target:
+        target.rename(renamed)
+    return renamed
 
 
 def sanitise(
@@ -42,7 +57,7 @@ def sanitise(
     for metadata in rectify_result.files:
         target = sanitised_dir / metadata.path.relative_to(rectify_result.rectified_dir)
         target.parent.mkdir(parents=True, exist_ok=True)
-        sanitise_file(
+        new_uid = sanitise_file(
             metadata.path,
             target,
             policy,
@@ -50,7 +65,7 @@ def sanitise(
             scan_date=rectify_result.subject.scan_date,
             replacement_cache=replacement_cache,
         )
-        files.append(target)
+        files.append(_renamed_for_uid(target, metadata.sop_instance_uid, new_uid))
 
     return SanitiseResult(
         subject=rectify_result.subject,
@@ -78,8 +93,9 @@ def sanitise_review(
 ) -> SanitiseReviewResult | None:
     """Write a sanitised copy of every rectified review file, or None if there are none.
 
-    Filenames/paths are preserved as rectify_review() produced them; only
-    DICOM tag content is scrubbed. Shares `replacement_cache` with the
+    Filenames/paths are preserved as rectify_review() produced them, except
+    that a regenerated SOP Instance UID replaces the original one in the
+    filename; otherwise only DICOM tag content is scrubbed. Shares `replacement_cache` with the
     retained-files sanitise() call so a UID appearing in both a retained and
     a review file regenerates to the same new value.
     """
@@ -92,7 +108,7 @@ def sanitise_review(
             rectify_review_result.review_rectified_dir
         )
         target.parent.mkdir(parents=True, exist_ok=True)
-        sanitise_file(
+        new_uid = sanitise_file(
             metadata.path,
             target,
             policy,
@@ -100,5 +116,5 @@ def sanitise_review(
             scan_date=scan_date,
             replacement_cache=replacement_cache,
         )
-        files.append(target)
+        files.append(_renamed_for_uid(target, metadata.sop_instance_uid, new_uid))
     return SanitiseReviewResult(sanitised_review_dir=sanitised_review_dir, files=files)

@@ -88,8 +88,10 @@ def test_write_audit_report_records_counts_and_flagged_files(tmp_path: Path) -> 
                 "dicom_count": "2",
                 "duplicate_count": "1",
                 "misfiled_count": "0",
+                "sop_conflict_count": "0",
                 "metadata_inconsistencies": "",
                 "status": "flagged",
+                "notes": "",
             }
         ]
 

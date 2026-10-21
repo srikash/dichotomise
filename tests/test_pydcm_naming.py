@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dichotomise.pydcm.naming import rectified_path
+from dichotomise.pydcm.naming import rectified_path, with_new_sop_instance_uid
 from dichotomise.pydcm.read import DicomMetadata
 
 
@@ -31,7 +31,7 @@ def test_rectified_path_uses_the_series_description_for_the_folder_name() -> Non
 
     result = rectified_path(base_dir, _metadata())
 
-    assert result == (base_dir / "021-diffusion" / "021_1.2.840.10008.5.1.4.1.1.4.99_0005_e01.dcm")
+    assert result == (base_dir / "021-diffusion" / "021_0005_1.2.3.4_e01.dcm")
 
 
 def test_rectified_path_pads_series_instance_and_echo_numbers() -> None:
@@ -41,8 +41,8 @@ def test_rectified_path_pads_series_instance_and_echo_numbers() -> None:
     )
 
     assert result.parent.name.startswith("003-")
-    assert result.name.startswith("003_")
-    assert "_0042_e09.dcm" in result.name
+    assert result.name.startswith("003_0042_")
+    assert result.name.endswith("_e09.dcm")
 
 
 def test_rectified_path_falls_back_to_na_for_blank_series_description() -> None:
@@ -55,3 +55,21 @@ def test_rectified_path_defaults_missing_echo_number_to_one() -> None:
     result = rectified_path(Path("/rectified"), _metadata(echo_number=None))
 
     assert "_e01.dcm" in result.name
+
+
+def test_rectified_path_is_unique_per_sop_instance_uid_even_with_repeated_instance_numbers() -> (
+    None
+):
+    first = rectified_path(Path("/r"), _metadata(sop_instance_uid="1.2.3.4", instance_number=1))
+    second = rectified_path(Path("/r"), _metadata(sop_instance_uid="1.2.3.5", instance_number=1))
+
+    assert first != second
+
+
+def test_with_new_sop_instance_uid_swaps_the_uid_in_the_filename() -> None:
+    path = rectified_path(Path("/r"), _metadata(sop_instance_uid="1.2.3.4"))
+
+    renamed = with_new_sop_instance_uid(path, "1.2.3.4", "9.8.7")
+
+    assert renamed.name == "021_0005_9.8.7_e01.dcm"
+    assert renamed.parent == path.parent

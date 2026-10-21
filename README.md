@@ -1,4 +1,4 @@
-# dichotomise [![Version](https://img.shields.io/badge/version-2.6.5-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.6.5) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
+# dichotomise [![Version](https://img.shields.io/badge/version-2.7.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.7.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
 
 <b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
 de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
@@ -160,11 +160,16 @@ One command runs the full pipeline, in order:
    straight from the source directory, with a checksum — before anything
    else is read from or written to them, so a later copy can never silently
    diverge from what this archive preserves.
-3. **audit** — flags duplicate scan content (by comparing everything except
-   each file's own unique ID), files sitting in the wrong series folder, and
-   inconsistent patient, study, or series metadata within a physical DICOM
-   folder. The CLI prints a Rich inventory table, and the reports include a
-   spreadsheet-friendly CSV.
+3. **audit** — flags duplicates (a file is a duplicate only if it is a
+   byte-for-byte copy of another file in the same folder), files that share a
+   SOP Instance UID with a file whose bytes differ (a metadata error, sent to
+   review as `sop_conflict`, never called a duplicate), files sitting in the
+   wrong series folder, and inconsistent patient, study, or series metadata
+   within a physical DICOM folder. The CLI prints a Rich inventory table
+   followed by a NOTES section that explains each finding in plain language
+   (for example which file belongs to which series, and which files repeat
+   which), and the reports include the same notes and a spreadsheet-friendly
+   CSV.
 4. **sift** — splits files into `retained` and `review`, logically, before
    the final archive is ever built, so a flagged file is never silently
    included in the archive you share. This is a classification step only
@@ -175,7 +180,12 @@ One command runs the full pipeline, in order:
 5. **rectify** — the pipeline's one copy of each file's bytes: it reads
    retained files straight from the source directory and writes them into a
    sorted, clearly named tree:
-   `<series number>-<series description>/<series>_<series ID>_<instance>_e<echo>.dcm`.
+   `<series number>-<series description>/<series>_<instance>_<SOP instance UID>_e<echo>.dcm`.
+   The SOP Instance UID is the identifier DICOM guarantees to be unique per
+   file, so a name never depends on instance numbers being unique. The echo
+   number is read from the per-frame groups of Enhanced MR files. In a
+   `--sanitise` run the file is renamed after the UID is regenerated, so the
+   filename always matches the header and never carries the original UID.
    Review files are renamed the same way (surfacing what a misfiled or
    duplicate file's own metadata claims, even when that metadata is wrong),
    and are then always archived with a checksum into `archives/` as their own
@@ -256,10 +266,10 @@ installing Python packages directly isn't an option.
 
 ```bash
 # Docker
-docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.6.5 --help
+docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.7.0 --help
 
 # Apptainer / Singularity
-apptainer run oras://ghcr.io/srikash/dichotomise:2.6.5-sif --help
+apptainer run oras://ghcr.io/srikash/dichotomise:2.7.0-sif --help
 ```
 
 Mount your source and output directories under `/data` (the image's working
@@ -279,7 +289,7 @@ since it delegates straight into the containerized CLI), auto-detects
 ```
 
 Set `DICHOTOMISE_ENGINE=docker|apptainer` to force an engine, and
-`DICHOTOMISE_VERSION=2.6.5` (default `latest`) to pin a release.
+`DICHOTOMISE_VERSION=2.7.0` (default `latest`) to pin a release.
 
 ## Usage
 
@@ -379,16 +389,23 @@ review files, no `review-archive` is created.
 Each study has a directory under `reports/` containing:
 
 - `stage-01-report.json` — audit totals, duplicate and misfiled folders, and
-  one summary per physical DICOM folder.
+  one summary per physical DICOM folder, each with its plain-language `notes`.
 - `stage-01-audit.csv` — the same per-folder audit summary for spreadsheets,
-  including duplicate/misfiled counts and differing metadata fields.
+  including duplicate/misfiled/SOP-conflict counts, differing metadata fields
+  and `notes`.
 - `stage-02-report.json` — files retained versus copied to `review/`, how
   many review files needed a disambiguating `-dupNN` suffix when renamed
-  (`review_rename_collisions`), and the name/checksum/sanitised state of that
+  (`review_rename_collisions`; only files that share a name but differ in
+  bytes), how many byte-identical review files were not written a second time
+  (`review_identical_files_not_rewritten`), and the name/checksum/sanitised state of that
   subject's `review-archive` in `archives/` (`null`/`false` when there were no
   review files to archive).
 - `stage-03-report.json` — archive checksum and a `series_inventory` with the
-  first original and final DICOM filename for every series.
+  first original and final DICOM filename for every series. For multi-echo or
+  multi-TI series it also lists, per file, the echo number and time, the ASL
+  context, and an inferred TI index. Siemens does not write the TI in these
+  headers, so the index is inferred from acquisition order and labelled as
+  such.
 - `source-manifest.csv` / `retained-manifest.csv` / `review-manifest.csv`
   (the last only if review files exist) — one row per file with `file`,
   `size_bytes`, `date_modified`, and `date_created`. On Linux, `date_created`
