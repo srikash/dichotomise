@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.7.1
+
+- Docs only, plus one help string. README: `--qc` prints the audit table and NOTES (the `--qc` help
+  text said "tables only"); SOP-UID conflicts are checked across the whole study (the whole source
+  directory under `--qc`); the numerically first duplicate is kept; byte-identical copies in
+  different folders are not flagged and collapse to one output file; the filename carries the
+  original UID only under a policy that does not reissue UIDs (`retain`); the install table of
+  contents points at real headings.
+
 ## v2.7.0
 
 **Breaking: rectified filenames change.** Files are now named

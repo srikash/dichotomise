@@ -1,4 +1,4 @@
-# dichotomise [![Version](https://img.shields.io/badge/version-2.7.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.7.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
+# dichotomise [![Version](https://img.shields.io/badge/version-2.7.1-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.7.1) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
 
 <b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
 de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
@@ -11,8 +11,10 @@ de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
   - [Two example incidents (from amongst several)](#two-example-incidents-from-amongst-several)
 - [What it does](#what-it-does)
 - [Installation](#installation)
-  - [Install from PyPI (after release)](#install-from-pypi-after-release)
-  - [Install from a source checkout](#install-from-a-source-checkout)
+  - [venv](#venv)
+  - [conda / mamba](#conda--mamba)
+  - [From a source checkout](#from-a-source-checkout)
+  - [uv](#uv)
   - [Container images](#container-images)
 - [Usage](#usage)
 - [Output structure](#output-structure)
@@ -161,15 +163,20 @@ One command runs the full pipeline, in order:
    else is read from or written to them, so a later copy can never silently
    diverge from what this archive preserves.
 3. **audit** — flags duplicates (a file is a duplicate only if it is a
-   byte-for-byte copy of another file in the same folder), files that share a
+   byte-for-byte copy of another file in the same folder; the numerically
+   first copy, `2.dcm` before `10.dcm`, is kept), files that share a
    SOP Instance UID with a file whose bytes differ (a metadata error, sent to
-   review as `sop_conflict`, never called a duplicate), files sitting in the
+   review as `sop_conflict`, never called a duplicate; checked across the
+   whole study, or across the whole source directory under `--qc`), files sitting in the
    wrong series folder, and inconsistent patient, study, or series metadata
    within a physical DICOM folder. The CLI prints a Rich inventory table
    followed by a NOTES section that explains each finding in plain language
    (for example which file belongs to which series, and which files repeat
    which), and the reports include the same notes and a spreadsheet-friendly
    CSV.
+   Byte-identical copies in *different* folders are not flagged: they are
+   not duplicates by this definition, and they share one output filename, so
+   they end up as a single file in the sorted tree.
 4. **sift** — splits files into `retained` and `review`, logically, before
    the final archive is ever built, so a flagged file is never silently
    included in the archive you share. This is a classification step only
@@ -183,9 +190,11 @@ One command runs the full pipeline, in order:
    `<series number>-<series description>/<series>_<instance>_<SOP instance UID>_e<echo>.dcm`.
    The SOP Instance UID is the identifier DICOM guarantees to be unique per
    file, so a name never depends on instance numbers being unique. The echo
-   number is read from the per-frame groups of Enhanced MR files. In a
+   number comes from the `EchoNumbers` header or, for Enhanced MR files, from
+   the per-frame groups. In a
    `--sanitise` run the file is renamed after the UID is regenerated, so the
-   filename always matches the header and never carries the original UID.
+   filename matches the header and, with any policy that reissues UIDs (all
+   shipped ones except `retain`), never carries the original UID.
    Review files are renamed the same way (surfacing what a misfiled or
    duplicate file's own metadata claims, even when that metadata is wrong),
    and are then always archived with a checksum into `archives/` as their own
@@ -266,10 +275,10 @@ installing Python packages directly isn't an option.
 
 ```bash
 # Docker
-docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.7.0 --help
+docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.7.1 --help
 
 # Apptainer / Singularity
-apptainer run oras://ghcr.io/srikash/dichotomise:2.7.0-sif --help
+apptainer run oras://ghcr.io/srikash/dichotomise:2.7.1-sif --help
 ```
 
 Mount your source and output directories under `/data` (the image's working
@@ -289,7 +298,7 @@ since it delegates straight into the containerized CLI), auto-detects
 ```
 
 Set `DICHOTOMISE_ENGINE=docker|apptainer` to force an engine, and
-`DICHOTOMISE_VERSION=2.7.0` (default `latest`) to pin a release.
+`DICHOTOMISE_VERSION=2.7.1` (default `latest`) to pin a release.
 
 ## Usage
 
@@ -303,8 +312,8 @@ To inspect an export without creating an output directory or saving a report:
 dichotomise --qc --source-dir ./study/sub-001
 ```
 
-`--qc` reads the DICOMs in place and prints the Rich audit table in the
-terminal. It never copies, changes, archives, or writes files.
+`--qc` reads the DICOMs in place and prints the Rich audit table and NOTES
+section in the terminal. It never copies, changes, archives, or writes files.
 
 `--source-dir` accepts either one subject/session export or a scanner export
 containing multiple subjects — they are discovered from DICOM metadata, so
@@ -314,7 +323,7 @@ folder names do not need to be sensible.
 |---|---|
 | `--source-dir` (required) | Raw DICOM directory to process. |
 | `--out-dir` | Parent directory for the timestamped output folder. Required unless `--qc` is used. |
-| `--qc` | Audit the source DICOMs in place and print tables only. Cannot be combined with processing flags. |
+| `--qc` | Audit the source DICOMs in place and print the audit table and NOTES only. Cannot be combined with processing flags. |
 | `--sanitise` | Replace patient identity before final archiving. This uses `minimal` unless a policy is chosen. |
 | `--sanitise-policy` | JSON policy name: `minimal` (the default), `standard`, `full`, `retain`, `custom`, or a policy you add yourself. Both `custom` and `custom.json` are accepted. Implies `--sanitise`. |
 | `--subj-id` | First numerical replacement ID. For one study, `6` produces `sub-0006`. With several studies, IDs are enumerated automatically as `sub-0006`, `sub-0007`, `sub-0008`, and so on; the CLI logs a warning. |
@@ -377,7 +386,7 @@ random six-character hexadecimal suffix. `<subject-label>` is the real
 label. A sanitised archive's filename and DICOM headers therefore do not
 expose the original identifier.
 
-If `audit`/`sift` found any duplicate or misfiled files for a subject, they
+If `audit`/`sift` found any duplicate, misfiled, or `sop_conflict` files for a subject, they
 are renamed the same way as the main archive's files and archived separately
 into `archives/` as a `review-archive` tarball with its own checksum. This
 archive always survives, independent of `--keep-working-files`, and is
@@ -415,7 +424,7 @@ Each study has a directory under `reports/` containing:
 The audit table and CSV flag differences in Patient ID/name, study UID/date/
 time, and series UID/number/description/protocol within a DICOM folder.
 
-Compression is always `.tar.gz`.
+Compression is always `.tar.gz`; `pigz` is used when it is on `PATH`.
 
 ## Sanitisation
 
