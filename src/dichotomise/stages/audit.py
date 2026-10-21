@@ -228,6 +228,7 @@ def _duplicate_runs(duplicates: dict[Path, Path]) -> tuple[list[str], int | None
         if (dup_number := _stem_number(dup)) is not None
         and (orig_number := _stem_number(orig)) is not None
     )
+    suffix = next((dup.suffix for dup in duplicates if _stem_number(dup) is not None), "")
     runs: list[list[tuple[int, int]]] = []
     for pair in numbered:
         if runs and pair[0] == runs[-1][-1][0] + 1 and pair[1] == runs[-1][-1][1] + 1:
@@ -238,10 +239,11 @@ def _duplicate_runs(duplicates: dict[Path, Path]) -> tuple[list[str], int | None
     for run in runs[:_MAX_LISTED]:
         (dup_lo, orig_lo), (dup_hi, orig_hi) = run[0], run[-1]
         if len(run) == 1:
-            texts.append(f"{dup_lo}.dcm is a byte-identical copy of {orig_lo}.dcm")
+            texts.append(f"{dup_lo}{suffix} is a byte-identical copy of {orig_lo}{suffix}")
         else:
             texts.append(
-                f"{dup_lo}-{dup_hi}.dcm are byte-identical copies of {orig_lo}-{orig_hi}.dcm"
+                f"{dup_lo}-{dup_hi}{suffix} are byte-identical copies of "
+                f"{orig_lo}-{orig_hi}{suffix}"
             )
     if len(runs) > _MAX_LISTED:
         hidden = sum(len(run) for run in runs[_MAX_LISTED:])

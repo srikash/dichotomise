@@ -172,3 +172,20 @@ def test_audit_sends_files_sharing_a_uid_with_different_bytes_to_review_as_confl
     assert note.texts == [
         "1-2.dcm share one SOP Instance UID but their contents differ; all are sent to review"
     ]
+
+
+def test_audit_names_extensionless_duplicates_by_their_real_filenames(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "export"
+    series = {"SeriesInstanceUID": "1.2.2", "SeriesNumber": 9, "StudyInstanceUID": "1.2.1"}
+    make_dicom_file(folder / "1", SOPInstanceUID="1.2.3.1", InstanceNumber=1, **series)
+    shutil.copyfile(folder / "1", folder / "2")
+    shutil.copyfile(folder / "1", folder / "MRe.1.2.3.9")
+
+    result = audit(_subject(folder))
+
+    assert {f.metadata.path.name for f in result.files if f.is_duplicate} == {"2", "MRe.1.2.3.9"}
+    notes = describe_findings(result.files)
+    assert any("2 is a byte-identical copy of 1" in note for note in notes)
+    assert not any(".dcm" in note for note in notes)
