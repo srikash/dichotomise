@@ -68,7 +68,7 @@ def make_tarball(
     The checksum sidecar sits next to the archive, named after it with a
     `.sha256` extension in place of `.tar.gz`. `on_progress`, if given, is
     called after each file is added with (bytes added so far, total bytes
-    to add) -- coarse-grained (per file, not per chunk), since tarfile adds
+    to add). Progress is coarse-grained (per file, not per chunk), since tarfile adds
     a whole file in one call.
     """
     items = sorted(source_dir.rglob("*"))
@@ -163,10 +163,10 @@ def _write_tarball(
 ) -> Archive:
     """Write every (path, arcname) entry into a new tarball at `archive_path`.
 
-    Prefers `pigz` for the gzip compression when it's on PATH -- it
+    Prefers `pigz` for the gzip compression when it's on PATH. It
     parallelises across CPU cores, where the stdlib `gzip`/`zlib` codec
-    `tarfile` otherwise uses is single-threaded -- falling back to the
-    stdlib path otherwise. Either way, the result is an ordinary .tar.gz.
+    `tarfile` otherwise uses is single-threaded. Without `pigz` it falls back to the
+    stdlib path. Either way, the result is an ordinary .tar.gz.
     """
     sorted_entries = list(entries)
     total_bytes = sum(path.stat().st_size for path, _ in sorted_entries if path.is_file())

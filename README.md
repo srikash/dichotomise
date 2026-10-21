@@ -154,15 +154,15 @@ outside a fragile folder hierarchy.
 
 One command runs the full pipeline, in order:
 
-1. **capture** — groups the source directory's DICOM files by
+1. **capture**: groups the source directory's DICOM files by
    `(PatientID, StudyInstanceUID)` from their own headers, never from folder
    names. Nothing is copied yet; every file stays exactly where the export
    left it.
-2. **source_archive** — archives each subject's untouched DICOM files,
-   straight from the source directory, with a checksum — before anything
-   else is read from or written to them, so a later copy can never silently
+2. **source_archive**: archives each subject's untouched DICOM files,
+   straight from the source directory, with a checksum, before anything
+   else is read from or written to them. A later copy can then never silently
    diverge from what this archive preserves.
-3. **audit** — flags duplicates (a file is a duplicate only if it is a
+3. **audit**: flags duplicates (a file is a duplicate only if it is a
    byte-for-byte copy of another file in the same folder; the numerically
    first copy, `2.dcm` before `10.dcm`, is kept), files that share a
    SOP Instance UID with a file whose bytes differ (a metadata error, sent to
@@ -177,14 +177,14 @@ One command runs the full pipeline, in order:
    Byte-identical copies in *different* folders are not flagged: they are
    not duplicates by this definition, and they share one output filename, so
    they end up as a single file in the sorted tree.
-4. **sift** — splits files into `retained` and `review`, logically, before
+4. **sift**: splits files into `retained` and `review`, logically, before
    the final archive is ever built, so a flagged file is never silently
    included in the archive you share. This is a classification step only
-   (no files move yet); there is no need to delete and re-export a whole
-   series to exclude one bad file — `sift` already excludes it, and the
+   (no files move yet). You do not need to delete and re-export a whole
+   series to exclude one bad file: `sift` already excludes it, and the
    untouched source archive (in `archives/`) remains the reference if you
    ever need the original file back.
-5. **rectify** — the pipeline's one copy of each file's bytes: it reads
+5. **rectify**: the pipeline's one copy of each file's bytes: it reads
    retained files straight from the source directory and writes them into a
    sorted, clearly named tree:
    `<series number>-<series description>/<series>_<instance>_<SOP instance UID>_e<echo>.dcm`.
@@ -199,12 +199,12 @@ One command runs the full pipeline, in order:
    duplicate file's own metadata claims, even when that metadata is wrong),
    and are then always archived with a checksum into `archives/` as their own
    `review-archive`, independent of `--keep-working-files`.
-6. **sanitise** *(optional, `--sanitise`)* — replaces patient identity
+6. **sanitise** *(optional, `--sanitise`)*: replaces patient identity
    according to a chosen policy; see [Sanitisation](#sanitisation) below. When
    used, the `review-archive` is de-identified with the same policy and the
    same replacement identifiers as the main archive, so a sanitised run never
    leaks real PHI through its review files either.
-7. **finalise** — independently re-reads the finished output tree (not a
+7. **finalise**: independently re-reads the finished output tree (not a
    cached record from earlier stages) to catch any corruption introduced by
    copying or renaming, then archives it with a checksum.
 
@@ -270,7 +270,7 @@ uv run dichotomise --help
 ### Container images
 
 Every tagged release also publishes a Docker image and an Apptainer/Singularity
-image to GHCR — useful for HPC clusters and containerized pipelines where
+image to GHCR, which is useful for HPC clusters and containerized pipelines where
 installing Python packages directly isn't an option.
 
 ```bash
@@ -316,7 +316,7 @@ dichotomise --qc --source-dir ./study/sub-001
 section in the terminal. It never copies, changes, archives, or writes files.
 
 `--source-dir` accepts either one subject/session export or a scanner export
-containing multiple subjects — they are discovered from DICOM metadata, so
+containing multiple subjects. They are discovered from DICOM metadata, so
 folder names do not need to be sensible.
 
 | Flag | Purpose |
@@ -332,7 +332,7 @@ folder names do not need to be sensible.
 | `--mapping` | One or more `PatientID:replacement_id` pairs. Repeat the flag or separate pairs with commas. The PatientID must exactly match the DICOM `PatientID`. |
 | `--mapping-file` | JSON object mapping DICOM PatientID to replacement ID, for example `{"source-01": "sub-0001"}`. A full path may be given with or without the `.json` suffix. |
 | `--keep-working-files` | Keep the processed DICOM files written during rectify/sanitise (`working/`) instead of deleting them once the archives are verified. |
-| `--keep-unzipped` | Also keep each study's final (optionally sanitised) files unarchived, in `final/` — independent of `--keep-working-files` — for a later BIDS conversion or other tooling that wants plain files rather than a tarball. |
+| `--keep-unzipped` | Also keep each study's final (optionally sanitised) files unarchived, in `final/`, independent of `--keep-working-files`, for a later BIDS conversion or other tooling that wants plain files rather than a tarball. |
 
 For one study, use `--subj-id`, `--random-name`, or `--new-id`. For several
 studies, use `--subj-id` (automatic enumeration), `--random-name`, `--mapping`,
@@ -397,26 +397,26 @@ review files, no `review-archive` is created.
 
 Each study has a directory under `reports/` containing:
 
-- `stage-01-report.json` — audit totals, duplicate and misfiled folders, and
+- `stage-01-report.json`: audit totals, duplicate and misfiled folders, and
   one summary per physical DICOM folder, each with its plain-language `notes`.
-- `stage-01-audit.csv` — the same per-folder audit summary for spreadsheets,
+- `stage-01-audit.csv`: the same per-folder audit summary for spreadsheets,
   including duplicate/misfiled/SOP-conflict counts, differing metadata fields
   and `notes`.
-- `stage-02-report.json` — files retained versus copied to `review/`, how
+- `stage-02-report.json`: files retained versus copied to `review/`, how
   many review files needed a disambiguating `-dupNN` suffix when renamed
   (`review_rename_collisions`; only files that share a name but differ in
   bytes), how many byte-identical review files were not written a second time
   (`review_identical_files_not_rewritten`), and the name/checksum/sanitised state of that
   subject's `review-archive` in `archives/` (`null`/`false` when there were no
   review files to archive).
-- `stage-03-report.json` — archive checksum and a `series_inventory` with the
+- `stage-03-report.json`: archive checksum and a `series_inventory` with the
   first original and final DICOM filename for every series. For multi-echo or
   multi-TI series it also lists, per file, the echo number and time, the ASL
   context, and an inferred TI index. Siemens does not write the TI in these
   headers, so the index is inferred from acquisition order and labelled as
   such.
 - `source-manifest.csv` / `retained-manifest.csv` / `review-manifest.csv`
-  (the last only if review files exist) — one row per file with `file`,
+  (the last only if review files exist): one row per file with `file`,
   `size_bytes`, `date_modified`, and `date_created`. On Linux, `date_created`
   is the filesystem's metadata-change time (`st_ctime`), not a true creation
   time, since Linux exposes no creation time via Python's `os.stat`.
@@ -428,7 +428,7 @@ Compression is always `.tar.gz`; `pigz` is used when it is on `PATH`.
 
 ## Sanitisation
 
-`--sanitise` applies a named policy — a small JSON file describing what
+`--sanitise` applies a named policy, a small JSON file describing what
 happens to each DICOM field: kept, removed, replaced with a fixed or
 run-specific value, given a newly generated identifier (consistent across
 every file for that subject), a birth date scrambled to an approximate but
@@ -442,10 +442,10 @@ Five policies ship in `src/dichotomise/pydcm/policies/`:
 | `standard` | Identity, patient address, accession number, institution, and device-operator fields removed; every UID reissued; birth date scrambled by ±1 year (day/month randomised too); demographic fields (e.g. sex) and all scan-descriptive text (protocol name, series/study description, etc.) kept. |
 | `full` | Everything `standard` does, plus scan-descriptive text and the device serial number also removed. |
 | `minimal` *(the default level)* | Everything `standard` does, but a generated pseudonym is used for both patient name (`Abrahall^Gracious`) and patient ID/output name (`abrahall_gracious`); the birth date is the scan date rather than scrambled. |
-| `custom` | A worked, commented example for building your own — not used automatically. |
+| `custom` | A worked, commented example for building your own. It is not used automatically. |
 
-Full detail — including the real scanner-export comparison these were
-built from, the policy file schema, and how to write your own — is in
+Full detail, including the real scanner-export comparison these were
+built from, the policy file schema, and how to write your own, is in
 [`docs/sanitise-policies.md`](docs/sanitise-policies.md). In short: copy
 `custom.json` to `<your-policy-name>.json` in the same folder, edit it, and
 run with `--sanitise-policy <your-policy-name>`.
@@ -475,14 +475,14 @@ uv run mypy src
 ```
 
 `tests/data/` (real, non-synthetic scan exports used for some tests) is
-gitignored and never committed — it may contain identifying information.
+gitignored and never committed. It may contain identifying information.
 
 ## Citing dichotomise
 
 Each release is archived on Zenodo with a DOI
 ([![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)).
 Citation metadata (including the author and license) is in
-[`CITATION.cff`](CITATION.cff) — GitHub renders a "Cite this repository"
+[`CITATION.cff`](CITATION.cff). GitHub renders a "Cite this repository"
 button from it on the repo's main page, or cite it directly:
 
 > Kashyap, S. (2026). *dichotomise* [Computer software].

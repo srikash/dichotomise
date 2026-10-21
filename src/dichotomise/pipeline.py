@@ -297,11 +297,11 @@ def run_pipeline(
 
     `keep_unzipped`, independent of `keep_working_files`, additionally copies
     each subject's final (optionally sanitised) tree into `final/`,
-    unarchived -- e.g. for a BIDS conversion that wants plain files on disk
+    unarchived, e.g. for a BIDS conversion that wants plain files on disk
     rather than a tarball.
 
     `on_run_start`, if given, is called with the `Run` immediately once its
-    timestamped output folder exists -- before anything else -- so a caller
+    timestamped output folder exists, before anything else, so a caller
     can report the actual created directory rather than the `out_dir` it
     will be created under.
     """

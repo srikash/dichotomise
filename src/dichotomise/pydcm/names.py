@@ -3,7 +3,7 @@
 Used by the `minimal` sanitisation policy's `random_name` action instead of a
 third-party package. Follows the same naming scheme the project previously
 used a vendored library for (one adjective, one surname, joined by "_"), but
-is otherwise our own code and our own word lists — nothing here is derived
+is otherwise our own code and our own word lists. Nothing here is derived
 from that library.
 
 SURNAMES is a sample (1000 of several thousand available) of real British

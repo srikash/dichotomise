@@ -63,7 +63,7 @@ def metadata_inconsistencies(files: Sequence[AuditedFile]) -> list[str]:
 def audit(subject: CapturedSubject) -> AuditResult:
     """Check a captured subject's files for duplicates, UID conflicts and misfiled files.
 
-    Runs against `subject.files` as capture() found them in place -- no
+    Runs against `subject.files` as capture() found them in place. No
     directory is re-scanned here.
 
     Misfiled and duplicate checks are computed per physical folder: a

@@ -21,7 +21,7 @@ class CapturedSubject:
     copied yet. `source_root` is the source directory they were found
     under, used to keep archived/report paths relative to it. `working_dir`
     is this subject's own folder under the run's working/ directory, where
-    later stages (rectify, sanitise) write their output -- the one place in
+    later stages (rectify, sanitise) write their output. This is the one place in
     the pipeline real copies are made.
     """
 

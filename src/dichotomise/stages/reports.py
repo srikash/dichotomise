@@ -98,7 +98,7 @@ def write_audit_report(audit_result: AuditResult, reports_dir: Path, *, subject_
     """Write stage-01-report.json: what the structural checks found.
 
     `subject_label` is the run's public label (the real PatientID, or the
-    replacement label if --sanitise was used) — never read from
+    replacement label if --sanitise was used). The report never reads
     `audit_result.subject.subject_id` directly, since that is always the raw
     PatientID and this report can sit inside a sanitised run's reports/
     folder.

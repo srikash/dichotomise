@@ -167,7 +167,7 @@ def _package_version() -> str:
 def _print_banner(source_dir: Path) -> None:
     """Print the run's opening banner: version, then the source path.
 
-    The output line is printed separately, once it is known -- either
+    The output line is printed separately, once it is known: either
     `_print_qc_mode_line()` immediately for a `--qc` run (which creates no
     output directory), or `_print_output_line()` once `run_pipeline()`
     reports the actual timestamped run folder it created.
@@ -206,7 +206,7 @@ def _format_elapsed(seconds: float) -> str:
 def _run_with_elapsed_ticker(run_started: float, work: Callable[[], _T]) -> _T:
     """Run `work()`, showing a continuously updating "Time elapsed" line meanwhile.
 
-    Only draws the ticker on an interactive terminal -- the same reasoning
+    Only draws the ticker on an interactive terminal, for the same reason
     as `_log_archive_progress`: a redirected/CI log has no use for a line
     that rewrites itself, and `work()` still runs normally without it.
     `work` (here, `run_pipeline()`) does its own logging via on_stage/

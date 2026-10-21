@@ -19,7 +19,7 @@ class ReviewFile:
 
 @dataclass(frozen=True)
 class SiftResult:
-    """A subject's files, split into retained vs review -- still at their original paths."""
+    """A subject's files, split into retained vs review, still at their original paths."""
 
     subject: CapturedSubject
     retained: list[DicomMetadata]

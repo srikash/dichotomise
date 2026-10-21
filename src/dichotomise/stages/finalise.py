@@ -22,8 +22,8 @@ class FinaliseResult:
     """The verified, archived, final output for one subject.
 
     `source_dir` is the already-verified tree that was archived (the
-    sanitised tree if `--sanitise` was used, otherwise the rectified tree)
-    -- kept here so a caller that also wants the unarchived files (for
+    sanitised tree if `--sanitise` was used, otherwise the rectified tree).
+    It is kept here so a caller that also wants the unarchived files (for
     `--keep-unzipped`) doesn't need to re-derive which tree that was.
     """
 
