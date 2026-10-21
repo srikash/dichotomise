@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import multiprocessing
+import os
 from collections.abc import Callable, Iterator
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -153,18 +157,58 @@ def read_metadata(path: Path) -> DicomMetadata:
     )
 
 
+# Reading headers is CPU-bound Python (pydicom parses a multi-frame file's per-frame
+# groups on first access), so a large export is read by several processes. Below this
+# many files the pool's start-up costs more than it saves.
+_PARALLEL_MIN_FILES = 200
+_MAX_WORKERS = 16
+_CHUNK_SIZE = 16
+
+
+def _read_or_none(path: Path) -> DicomMetadata | None:
+    try:
+        return read_metadata(path)
+    except NotDicomError:
+        return None
+
+
+def _worker_count() -> int:
+    try:
+        available = len(os.sched_getaffinity(0))
+    except AttributeError:  # not available on every platform
+        available = os.cpu_count() or 1
+    return max(1, min(available, _MAX_WORKERS))
+
+
+def _read_in_parallel(paths: list[Path]) -> list[DicomMetadata | None] | None:
+    """Read `paths` with a pool of processes, or return None if one cannot be used here."""
+    workers = _worker_count()
+    if workers < 2:
+        return None
+    try:
+        # forkserver, not fork: the CLI runs this beside a ticker thread.
+        context = multiprocessing.get_context("forkserver")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+            return list(pool.map(_read_or_none, paths, chunksize=_CHUNK_SIZE))
+    except (OSError, NotImplementedError, BrokenProcessPool):
+        return None  # e.g. a sandbox without shared memory: read the files one by one
+
+
 def iter_dicom_metadata(root: Path) -> Iterator[DicomMetadata]:
     """Recursively yield metadata for every readable DICOM file under `root`.
 
     Non-DICOM files (stray text files, checksums, thumbnails, ...) are
     silently skipped rather than raised on, since an export directory
-    commonly contains a mix.
+    commonly contains a mix. Files come back in sorted path order whether
+    they were read serially or in parallel.
     """
-    for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        try:
-            yield read_metadata(path)
-        except NotDicomError:
-            continue
+    paths = sorted(p for p in root.rglob("*") if p.is_file())
+    results = _read_in_parallel(paths) if len(paths) >= _PARALLEL_MIN_FILES else None
+    if results is None:
+        results = [_read_or_none(path) for path in paths]
+    for metadata in results:
+        if metadata is not None:
+            yield metadata
 
 
 def iter_dicom_files(root: Path) -> Iterator[Path]:

@@ -7,7 +7,13 @@ import pydicom
 import pytest
 
 from dichotomise.errors import NotDicomError
-from dichotomise.pydcm.read import _optional_number, iter_dicom_files, read_metadata
+from dichotomise.pydcm import read as read_module
+from dichotomise.pydcm.read import (
+    _optional_number,
+    iter_dicom_files,
+    iter_dicom_metadata,
+    read_metadata,
+)
 
 
 def test_read_metadata_extracts_expected_fields(
@@ -107,3 +113,21 @@ def test_read_metadata_reads_a_single_inversion_time_from_the_shared_groups(
     dataset.save_as(path)
 
     assert read_metadata(path).inversion_time == 800.0
+
+
+def test_iter_dicom_metadata_gives_the_same_list_when_read_in_parallel(
+    tmp_path: Path,
+    make_dicom_file: Callable[..., Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = tmp_path / "export"
+    for number in range(6):
+        make_dicom_file(folder / f"file-{number}", InstanceNumber=number + 1)
+    (folder / "notes.txt").write_text("not a DICOM file")
+    serial = list(iter_dicom_metadata(folder))
+
+    monkeypatch.setattr(read_module, "_PARALLEL_MIN_FILES", 1)
+    parallel = list(iter_dicom_metadata(folder))
+
+    assert len(serial) == 6
+    assert parallel == serial
