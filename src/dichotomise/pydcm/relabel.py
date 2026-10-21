@@ -6,6 +6,7 @@ import calendar
 import json
 import random
 import re
+from collections import defaultdict
 from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pydicom
+from pydicom.datadict import dictionary_VR, tag_for_keyword
 from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
 from pydicom.uid import generate_uid
@@ -165,10 +167,16 @@ def _remove_field(dataset: Dataset, field: str) -> None:
 def _iter_nested_datasets(dataset: Dataset) -> Iterator[Dataset]:
     """Yield a dataset and every dataset contained in its sequences."""
     yield dataset
-    for element in dataset:
-        if element.VR != "SQ" or not isinstance(element.value, Sequence):
+    for tag in list(dataset.keys()):
+        # Read the VR from the raw element where there is one, so elements that are not
+        # sequences are never converted.
+        raw = dataset.get_item(tag)
+        if (raw.VR or dataset[tag].VR) != "SQ":
             continue
-        for item in element.value:
+        value = dataset[tag].value
+        if not isinstance(value, Sequence):
+            continue
+        for item in value:
             yield from _iter_nested_datasets(item)
 
 
@@ -178,6 +186,25 @@ def _iter_policy_datasets(dataset: Dataset) -> Iterator[Dataset]:
     file_meta = getattr(dataset, "file_meta", None)
     if file_meta is not None:
         yield from _iter_nested_datasets(file_meta)
+
+
+def _index_by_tag(dataset: Dataset) -> dict[int, list[Dataset]]:
+    """Map each tag to the datasets that hold it, in the order `_iter_policy_datasets` visits."""
+    index: dict[int, list[Dataset]] = defaultdict(list)
+    for current in _iter_policy_datasets(dataset):
+        # .keys(), not iteration: iterating a Dataset converts every element.
+        for tag in current.keys():  # noqa: SIM118
+            index[tag].append(current)
+    return index
+
+
+def _is_sequence_tag(tag: int | None) -> bool:
+    if tag is None:
+        return False
+    try:
+        return bool(dictionary_VR(tag) == "SQ")
+    except KeyError:
+        return False
 
 
 def _replace_field(
@@ -356,13 +383,22 @@ def apply_policy(
         "<subject-name>": format_subject_name(subject_label),
         "<scan-date>": scan_date,
     }
+    # Walk the dataset once and look each field up by tag, rather than walking every
+    # nested dataset again for every field in the policy. The top-level dataset is
+    # always visited; nested ones only if they hold the field. The index is rebuilt
+    # when an action changes which datasets exist.
+    index = _index_by_tag(dataset)
     for field, instruction in policy.actions.items():
         action = instruction["action"]
-        for current_dataset in _iter_policy_datasets(dataset):
-            if action in ("add", "add_code_sequence") and current_dataset is not dataset:
-                continue
-            if current_dataset is not dataset and not hasattr(current_dataset, field):
-                continue
+        tag = tag_for_keyword(field)
+        targets = [dataset]
+        if action not in ("add", "add_code_sequence") and tag is not None:
+            targets += [
+                current
+                for current in index.get(tag, ())
+                if current is not dataset and tag in current
+            ]
+        for current_dataset in targets:
             _apply_action(
                 current_dataset,
                 field,
@@ -370,6 +406,8 @@ def apply_policy(
                 placeholders,
                 replacement_cache,
             )
+        if action in ("add", "add_code_sequence") or (action == "remove" and _is_sequence_tag(tag)):
+            index = _index_by_tag(dataset)
     _sync_file_meta_sop_instance_uid(dataset)
 
 

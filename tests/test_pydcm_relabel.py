@@ -292,3 +292,59 @@ def test_apply_policy_minimal_gives_a_random_name_and_scandate_birthdate() -> No
     assert dataset.PatientName not in ("Doe^Jane^19900101", "sub-0005")
     assert dataset.PatientID == "sub-0005"
     assert dataset.PatientBirthDate == "20260914"
+
+
+def _item(**fields: object) -> Dataset:
+    item = Dataset()
+    for key, value in fields.items():
+        setattr(item, key, value)
+    return item
+
+
+def test_apply_policy_reaches_fields_at_every_depth_of_nested_sequences() -> None:
+    dataset = Dataset()
+    dataset.PatientID = "real-id"
+    dataset.OtherPatientIDsSequence = [_item(PatientID="real-id-too")]
+    dataset.ReferencedStudySequence = [
+        _item(
+            ReferencedSOPInstanceUID="1.2.3",
+            ReferencedSeriesSequence=[_item(ReferencedSOPInstanceUID="1.2.3")],
+        )
+    ]
+    policy = Policy(
+        name="test",
+        actions={
+            "PatientID": {"action": "replace", "value": "sub-0001"},
+            "ReferencedSOPInstanceUID": {"action": "regenerate"},
+        },
+    )
+
+    apply_policy(dataset, policy, subject_label="sub-0001", scan_date="", replacement_cache={})
+
+    outer = dataset.ReferencedStudySequence[0]
+    inner = outer.ReferencedSeriesSequence[0]
+    assert dataset.PatientID == "sub-0001"
+    assert dataset.OtherPatientIDsSequence[0].PatientID == "sub-0001"
+    assert outer.ReferencedSOPInstanceUID != "1.2.3"
+    assert inner.ReferencedSOPInstanceUID == outer.ReferencedSOPInstanceUID
+
+
+def test_apply_policy_removes_a_sequence_that_nests_itself_and_the_fields_inside_it() -> None:
+    dataset = Dataset()
+    dataset.ContentSequence = [
+        _item(TextValue="secret", ContentSequence=[_item(TextValue="more secret")])
+    ]
+    dataset.ReferencedStudySequence = [_item(ContentSequence=[_item(TextValue="nested secret")])]
+    policy = Policy(
+        name="test",
+        actions={
+            "ContentSequence": {"action": "remove"},
+            "TextValue": {"action": "remove"},
+        },
+    )
+
+    apply_policy(dataset, policy, subject_label="sub-0001", scan_date="", replacement_cache={})
+
+    assert "ContentSequence" not in dataset
+    assert "ContentSequence" not in dataset.ReferencedStudySequence[0]
+    assert "secret" not in repr(dataset)
