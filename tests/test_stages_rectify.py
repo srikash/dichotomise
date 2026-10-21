@@ -75,6 +75,30 @@ def test_rectify_copies_retained_files_into_their_agreed_names(tmp_path: Path) -
     assert path_b.read_bytes() == b"second"
 
 
+def test_rectify_writes_a_byte_identical_repeat_in_another_folder_only_once(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "export"
+    path_a = source_dir / "exportA" / "021-DWI" / "1.dcm"
+    path_b = source_dir / "exportB" / "021-DWI" / "1.dcm"
+    for path in (path_a, path_b):
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"same bytes")
+
+    subject = _subject(tmp_path / "working" / "sub-01", source_dir)
+    sift_result = SiftResult(
+        subject=subject,
+        retained=[_metadata(path_a), _metadata(path_b)],
+        review=[],
+    )
+
+    result = rectify(sift_result)
+
+    expected = result.rectified_dir / "021-diffusion" / "021_0001_sop-1_e01.dcm"
+    assert [f.path for f in result.files] == [expected]
+    assert expected.read_bytes() == b"same bytes"
+
+
 def test_rectify_raises_when_two_different_files_would_share_a_name(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:

@@ -31,10 +31,12 @@ class RectifyResult:
 def rectify(sift_result: SiftResult) -> RectifyResult:
     """Copy every retained file into its rectified name and folder.
 
-    Two different scan files that would land on the exact same rectified
-    name is a real ambiguity about which file the name belongs to (sift
-    already removed genuine duplicates), so it stops the run rather than
-    silently picking one or numbering around it.
+    A byte-identical file that lands on a name already written is the same
+    file again (for example a copy of an export in another folder), so it is
+    not written or listed a second time. Two different scan files that would
+    land on the exact same rectified name is a real ambiguity about which
+    file the name belongs to, so it stops the run rather than silently
+    picking one or numbering around it.
     """
     rectified_dir = sift_result.subject.working_dir / "rectify"
     occupied: dict[Path, DicomMetadata] = {}
@@ -42,11 +44,13 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
 
     for metadata in sift_result.retained:
         target = rectified_path(rectified_dir, metadata)
-        if target in occupied and file_digest(occupied[target].path) != file_digest(metadata.path):
-            raise NamingCollisionError(
-                f"Two different scan files would both be named {target.name}: "
-                f"{occupied[target].path} and {metadata.path}"
-            )
+        if target in occupied:
+            if file_digest(occupied[target].path) != file_digest(metadata.path):
+                raise NamingCollisionError(
+                    f"Two different scan files would both be named {target.name}: "
+                    f"{occupied[target].path} and {metadata.path}"
+                )
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(metadata.path, target)
         occupied[target] = metadata

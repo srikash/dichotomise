@@ -450,6 +450,34 @@ def test_run_pipeline_sends_sop_uid_conflicts_to_review_without_failing(
     assert any("-dup01" in name for name in names)
 
 
+@pytest.mark.parametrize("sanitise", [False, True])
+def test_run_pipeline_collapses_a_byte_identical_copy_in_another_folder(
+    tmp_path: Path, make_dicom_file: Callable[..., Path], sanitise: bool
+) -> None:
+    source = tmp_path / "export"
+    original = make_dicom_file(
+        source / "exportA" / "021-DWI" / "1.dcm",
+        PatientID="sub-01",
+        StudyInstanceUID="1.2.1",
+        SeriesInstanceUID="1.2.2",
+        SeriesNumber=21,
+        InstanceNumber=1,
+    )
+    (source / "exportB" / "021-DWI").mkdir(parents=True)
+    shutil.copy2(original, source / "exportB" / "021-DWI" / "1.dcm")
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=sanitise)
+
+    (archive,) = run.archives_dir.glob("*_dichotomised-archive_*.tar.gz")
+    with tarfile.open(archive, "r:gz") as tar:
+        names = [Path(m.name).name for m in tar.getmembers() if m.isfile()]
+    assert len(names) == 1
+    audit_report = json.loads(
+        (next(run.reports_dir.iterdir()) / "stage-01-report.json").read_text()
+    )
+    assert audit_report["duplicate_count"] == 0
+
+
 def test_run_pipeline_sanitised_archives_name_files_after_the_regenerated_uid(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
