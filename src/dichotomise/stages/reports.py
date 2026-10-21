@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pydicom
 
 from dichotomise.pydcm.acquisition import infer_ti_index, summarise_acquisition
 from dichotomise.pydcm.read import DicomMetadata
@@ -23,7 +27,7 @@ from dichotomise.stages.audit import (
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.finalise import FinaliseResult
 from dichotomise.stages.rectify import RectifyResult, RectifyReviewResult
-from dichotomise.stages.sanitise import SanitiseResult
+from dichotomise.stages.sanitise import SanitiseResult, SanitiseReviewResult
 from dichotomise.stages.sift import SiftResult
 from dichotomise.utils.archive import Archive
 from dichotomise.utils.text import natural_sort_key
@@ -31,6 +35,43 @@ from dichotomise.utils.text import natural_sort_key
 
 def _relative(path: Path, base: Path) -> str:
     return str(path.relative_to(base))
+
+
+def pseudonymous_source_names(files: Sequence[DicomMetadata]) -> dict[Path, Path]:
+    """Map each source file to a neutral `folder-NN/NNNN` name for a sanitised run's reports.
+
+    Source filenames and folder names can carry identifiers: a participant
+    code, the scan date and time, or the original SOP Instance UID. A
+    sanitised run's reports refer to files by position instead; the way back
+    to the real names is the source map written next to the source archive.
+    """
+    by_folder: dict[Path, list[Path]] = {}
+    for metadata in files:
+        by_folder.setdefault(metadata.path.parent, []).append(metadata.path)
+    folder_width = max(2, len(str(len(by_folder))))
+    names: dict[Path, Path] = {}
+    folders = sorted(by_folder, key=lambda folder: (natural_sort_key(folder.name), folder))
+    for folder_number, folder in enumerate(folders, 1):
+        paths = sorted(by_folder[folder], key=lambda path: (natural_sort_key(path.name), path))
+        file_width = max(4, len(str(len(paths))))
+        for file_number, path in enumerate(paths, 1):
+            names[path] = Path(f"folder-{folder_number:0{folder_width}d}") / (
+                f"{file_number:0{file_width}d}"
+            )
+    return names
+
+
+def pseudonymised_audit(audit_result: AuditResult, names: Mapping[Path, Path]) -> AuditResult:
+    """Return `audit_result` with every source path replaced by its pseudonymous name."""
+    files = [
+        replace(
+            audited_file,
+            metadata=replace(audited_file.metadata, path=names[audited_file.metadata.path]),
+            duplicate_of=names[audited_file.duplicate_of] if audited_file.duplicate_of else None,
+        )
+        for audited_file in audit_result.files
+    ]
+    return replace(audit_result, files=files)
 
 
 def _write(reports_dir: Path, filename: str, data: dict[str, object]) -> Path:
@@ -139,11 +180,16 @@ def write_sift_report(
     rectify_review_result: RectifyReviewResult | None = None,
     review_archive: Archive | None = None,
     review_sanitised: bool = False,
+    names: Mapping[Path, Path] | None = None,
 ) -> Path:
     """Write stage-02-report.json: what was retained versus sent for review."""
     review = [
         {
-            "file": _relative(item.metadata.path, sift_result.subject.source_root),
+            "file": (
+                names[item.metadata.path].as_posix()
+                if names
+                else _relative(item.metadata.path, sift_result.subject.source_root)
+            ),
             "reason": item.reason,
         }
         for item in sift_result.review
@@ -173,8 +219,15 @@ def write_sift_report(
     return _write(reports_dir, "stage-02-report.json", data)
 
 
-def _write_manifest_csv(files: list[Path], root: Path, manifest_path: Path) -> Path:
+def _write_manifest_csv(
+    files: list[Path],
+    root: Path,
+    manifest_path: Path,
+    names: Mapping[Path, Path] | None = None,
+) -> Path:
     """Write a CSV of file/size/modified/created, paths relative to `root`.
+
+    With `names`, each file is listed under its pseudonymous name instead.
 
     "date_created" uses st_birthtime where the OS provides it (macOS/BSD),
     falling back to st_ctime (metadata-change time, not true creation time)
@@ -186,12 +239,12 @@ def _write_manifest_csv(files: list[Path], root: Path, manifest_path: Path) -> P
             handle, fieldnames=["file", "size_bytes", "date_modified", "date_created"]
         )
         writer.writeheader()
-        for path in sorted(files):
+        for path in sorted(files, key=lambda item: names[item] if names else item):
             stat = path.stat()
             created = getattr(stat, "st_birthtime", stat.st_ctime)
             writer.writerow(
                 {
-                    "file": _relative(path, root),
+                    "file": names[path].as_posix() if names else _relative(path, root),
                     "size_bytes": stat.st_size,
                     "date_modified": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
                     "date_created": datetime.fromtimestamp(created, tz=UTC).isoformat(),
@@ -200,27 +253,35 @@ def _write_manifest_csv(files: list[Path], root: Path, manifest_path: Path) -> P
     return manifest_path
 
 
-def write_source_manifest(subject: CapturedSubject, reports_dir: Path) -> Path:
+def write_source_manifest(
+    subject: CapturedSubject, reports_dir: Path, *, names: Mapping[Path, Path] | None = None
+) -> Path:
     """Write source-manifest.csv: every captured source file, size and timestamps."""
     files = sorted(metadata.path for metadata in subject.files)
-    return _write_manifest_csv(files, subject.source_root, reports_dir / "source-manifest.csv")
-
-
-def write_retained_manifest(sift_result: SiftResult, reports_dir: Path) -> Path:
-    """Write retained-manifest.csv: every file that passed sift, size and timestamps."""
-    files = [item.path for item in sift_result.retained]
     return _write_manifest_csv(
-        files, sift_result.subject.source_root, reports_dir / "retained-manifest.csv"
+        files, subject.source_root, reports_dir / "source-manifest.csv", names
     )
 
 
-def write_review_manifest(sift_result: SiftResult, reports_dir: Path) -> Path | None:
+def write_retained_manifest(
+    sift_result: SiftResult, reports_dir: Path, *, names: Mapping[Path, Path] | None = None
+) -> Path:
+    """Write retained-manifest.csv: every file that passed sift, size and timestamps."""
+    files = [item.path for item in sift_result.retained]
+    return _write_manifest_csv(
+        files, sift_result.subject.source_root, reports_dir / "retained-manifest.csv", names
+    )
+
+
+def write_review_manifest(
+    sift_result: SiftResult, reports_dir: Path, *, names: Mapping[Path, Path] | None = None
+) -> Path | None:
     """Write review-manifest.csv, or None if nothing was sent to review."""
     if not sift_result.review:
         return None
     files = [item.metadata.path for item in sift_result.review]
     return _write_manifest_csv(
-        files, sift_result.subject.source_root, reports_dir / "review-manifest.csv"
+        files, sift_result.subject.source_root, reports_dir / "review-manifest.csv", names
     )
 
 
@@ -228,8 +289,13 @@ def _series_inventory(
     audit_result: AuditResult,
     rectify_result: RectifyResult,
     sanitise_result: SanitiseResult | None,
+    names: Mapping[Path, Path] | None = None,
 ) -> list[dict[str, object]]:
-    """Return one filename mapping for the first retained DICOM in each series."""
+    """Return one filename mapping for the first retained DICOM in each series.
+
+    With `names` (a sanitised run), the source file is listed under its
+    pseudonymous name and the series under its reissued SeriesInstanceUID.
+    """
     source_by_series: dict[str, list[AuditedFile]] = {}
     for audited_file in audit_result.files:
         source_by_series.setdefault(audited_file.metadata.series_instance_uid, []).append(
@@ -265,17 +331,25 @@ def _series_inventory(
             ).name
         metadata = first_source.metadata
         acquisition = summarise_acquisition(rectified_files)
+        shown_series_uid: str | None = series_uid
+        if names is not None:
+            shown_series_uid = None
+            if first_rectified is not None:
+                final_path = final_path_by_rectified.get(first_rectified.path)
+                if final_path is not None:
+                    header = pydicom.dcmread(final_path, stop_before_pixels=True)
+                    shown_series_uid = str(header.get("SeriesInstanceUID", "")) or None
         entry: dict[str, object] = {
             "series_number": metadata.series_number,
             "series_description": metadata.series_description,
-            "series_instance_uid": series_uid,
+            "series_instance_uid": shown_series_uid,
             "source_file_count": len(source_files),
             "archived_file_count": len(rectified_files),
             "review_file_count": sum(
                 item.is_duplicate or item.is_misfiled or item.is_sop_conflict
                 for item in source_files
             ),
-            "first_dicom_before": metadata.path.name,
+            "first_dicom_before": (names[metadata.path] if names else metadata.path).name,
             "first_dicom_after": after_name,
         }
         if acquisition.is_multi_echo_or_ti:
@@ -305,6 +379,7 @@ def write_finalise_report(
     audit_result: AuditResult | None = None,
     rectify_result: RectifyResult | None = None,
     sanitise_result: SanitiseResult | None = None,
+    names: Mapping[Path, Path] | None = None,
 ) -> Path:
     """Write stage-03-report.json: archive details and per-series filename mappings."""
     data = {
@@ -317,5 +392,78 @@ def write_finalise_report(
         "sanitise_level": sanitise_level,
     }
     if audit_result is not None and rectify_result is not None:
-        data["series_inventory"] = _series_inventory(audit_result, rectify_result, sanitise_result)
+        data["series_inventory"] = _series_inventory(
+            audit_result, rectify_result, sanitise_result, names
+        )
     return _write(reports_dir, "stage-03-report.json", data)
+
+
+def write_source_map(
+    map_path: Path,
+    *,
+    sift_result: SiftResult,
+    rectify_result: RectifyResult,
+    rectify_review_result: RectifyReviewResult,
+    sanitise_result: SanitiseResult | None,
+    sanitise_review_result: SanitiseReviewResult | None,
+    names: Mapping[Path, Path],
+) -> Path:
+    """Write the CSV that links a sanitised run's pseudonymous report names to the real ones.
+
+    It holds real source paths, so it sits in archives/ beside the source
+    archive, which already holds the real identity, and never in reports/.
+    """
+    final_tree = sanitise_result.sanitised_dir if sanitise_result else rectify_result.rectified_dir
+    final_path_by_rectified = (
+        dict(zip((m.path for m in rectify_result.files), sanitise_result.files, strict=True))
+        if sanitise_result is not None
+        else {}
+    )
+    review_tree = (
+        sanitise_review_result.sanitised_review_dir
+        if sanitise_review_result
+        else rectify_review_result.review_rectified_dir
+    )
+    final_review_by_rectified = (
+        dict(
+            zip(
+                (m.path for m in rectify_review_result.files),
+                sanitise_review_result.files,
+                strict=True,
+            )
+        )
+        if sanitise_review_result is not None
+        else {}
+    )
+    rows: list[tuple[Path, str, str]] = []
+    for item in sift_result.retained:
+        target = rectify_result.target_by_source[item.path]
+        final = final_path_by_rectified.get(target, target)
+        rows.append((item.path, "retained", final.relative_to(final_tree).as_posix()))
+    for review_item in sift_result.review:
+        target = rectify_review_result.target_by_source[review_item.metadata.path]
+        final = final_review_by_rectified.get(target, target)
+        rows.append(
+            (
+                review_item.metadata.path,
+                f"review:{review_item.reason}",
+                final.relative_to(review_tree).as_posix(),
+            )
+        )
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    with map_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=["report_name", "source_file", "size_bytes", "status", "final_file"]
+        )
+        writer.writeheader()
+        for source, status, final_name in sorted(rows, key=lambda row: names[row[0]]):
+            writer.writerow(
+                {
+                    "report_name": names[source].as_posix(),
+                    "source_file": _relative(source, sift_result.subject.source_root),
+                    "size_bytes": source.stat().st_size,
+                    "status": status,
+                    "final_file": final_name,
+                }
+            )
+    return map_path

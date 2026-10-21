@@ -352,6 +352,7 @@ Every run creates one timestamped, UTC output folder beneath `--out-dir`:
   archives/
     <patient-id>_<6char-hex>_source-archive_<run-timestamp>.tar.gz
     <patient-id>_<6char-hex>_source-archive_<run-timestamp>.sha256
+    <patient-id>_<6char-hex>_source-map_<run-timestamp>.csv           # only with --sanitise
     <subject-label>_<6char-hex>_dichotomised-archive_<run-timestamp>.tar.gz
     <subject-label>_<6char-hex>_dichotomised-archive_<run-timestamp>.sha256
     <subject-label>_<6char-hex>_review-archive_<run-timestamp>.tar.gz        # only if review files exist
@@ -425,6 +426,15 @@ Each study has a directory under `reports/` containing:
 
 The audit table and CSV flag differences in Patient ID/name, study UID/date/
 time, and series UID/number/description/protocol within a DICOM folder.
+
+In a `--sanitise` run the reports never carry source names. Source filenames, folder names and
+the original SeriesInstanceUID can hold a participant code, the scan date and time, or the original
+SOP Instance UID, so the manifests, `stage-01` and `stage-02` list files as `folder-NN/NNNN` and
+`stage-03` shows the reissued SeriesInstanceUID. (The `retain` policy reissues no UIDs, so there
+`stage-03` keeps the original UIDs, as the archive does.) `<patient-id>_<hex>_source-map_<run-timestamp>.csv`
+in `archives/` maps each `folder-NN/NNNN` back to its source file, size, retained or review status
+and final filename. It holds real names, so keep it with the source archive and out of anything you
+share.
 
 Compression is always `.tar.gz`; `pigz` is used when it is on `PATH`.
 

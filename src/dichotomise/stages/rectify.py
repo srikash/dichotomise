@@ -8,7 +8,7 @@ rectify_review() below) read straight from those original paths.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from dichotomise.errors import NamingCollisionError
@@ -27,6 +27,7 @@ class RectifyResult:
     rectified_dir: Path
     files: list[DicomMetadata]
     merged_identical_count: int = 0
+    target_by_source: dict[Path, Path] = field(default_factory=dict)
 
 
 def rectify(sift_result: SiftResult) -> RectifyResult:
@@ -44,6 +45,7 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
     occupied: dict[Path, DicomMetadata] = {}
     files: list[DicomMetadata] = []
     merged_identical_count = 0
+    target_by_source: dict[Path, Path] = {}
 
     for metadata in sift_result.retained:
         target = rectified_path(rectified_dir, metadata)
@@ -54,10 +56,12 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
                     f"{occupied[target].path} and {metadata.path}"
                 )
             merged_identical_count += 1
+            target_by_source[metadata.path] = target
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(metadata.path, target)
         occupied[target] = metadata
+        target_by_source[metadata.path] = target
         files.append(replace(metadata, path=target))
 
     return RectifyResult(
@@ -65,6 +69,7 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
         rectified_dir=rectified_dir,
         files=files,
         merged_identical_count=merged_identical_count,
+        target_by_source=target_by_source,
     )
 
 
@@ -76,6 +81,7 @@ class RectifyReviewResult:
     files: list[DicomMetadata]
     collision_count: int
     merged_identical_count: int = 0
+    target_by_source: dict[Path, Path] = field(default_factory=dict)
 
 
 def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
@@ -95,13 +101,16 @@ def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
     files: list[DicomMetadata] = []
     collision_count = 0
     merged_identical_count = 0
+    target_by_source: dict[Path, Path] = {}
 
     for item in sift_result.review:
         target = rectified_path(review_rectified_dir, item.metadata)
         digest = file_digest(item.metadata.path)
         previous = written.setdefault(target, [])
-        if any(file_digest(path) == digest for path in previous):
+        matched = next((path for path in previous if file_digest(path) == digest), None)
+        if matched is not None:
             merged_identical_count += 1
+            target_by_source[item.metadata.path] = target_by_source[matched]
             continue
         occurrence = len(previous)
         previous.append(item.metadata.path)
@@ -110,6 +119,7 @@ def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
             target = target.with_name(f"{target.stem}-dup{occurrence:02d}{target.suffix}")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(item.metadata.path, target)
+        target_by_source[item.metadata.path] = target
         files.append(replace(item.metadata, path=target))
 
     return RectifyReviewResult(
@@ -117,4 +127,5 @@ def rectify_review(sift_result: SiftResult) -> RectifyReviewResult:
         files=files,
         collision_count=collision_count,
         merged_identical_count=merged_identical_count,
+        target_by_source=target_by_source,
     )

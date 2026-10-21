@@ -23,16 +23,20 @@ from dichotomise.stages.capture import CapturedSubject, capture
 from dichotomise.stages.finalise import finalise, finalise_review
 from dichotomise.stages.rectify import rectify, rectify_review
 from dichotomise.stages.reports import (
+    pseudonymised_audit,
+    pseudonymous_source_names,
     write_audit_report,
     write_finalise_report,
     write_retained_manifest,
     write_review_manifest,
     write_sift_report,
     write_source_manifest,
+    write_source_map,
 )
 from dichotomise.stages.sanitise import sanitise, sanitise_review
 from dichotomise.stages.sift import sift
 from dichotomise.stages.source_archive import source_archive
+from dichotomise.utils.archive import Archive
 from dichotomise.utils.text import safe_filename_text
 
 _T = TypeVar("_T")
@@ -124,19 +128,26 @@ def _archive_source_subject(
     run: Run,
     description: str,
     on_archive_progress: ArchiveProgressCallback | None,
-) -> None:
+) -> Archive:
     """Archive one captured study before it is audited or transformed."""
     on_progress = (
         (lambda done, total: on_archive_progress(description, done, total))
         if on_archive_progress is not None
         else None
     )
-    source_archive(subject, run, on_progress=on_progress)
+    return source_archive(subject, run, on_progress=on_progress)
+
+
+def _source_map_path(source_archive_path: Path) -> Path:
+    """Name the source map after the source archive it sits beside."""
+    stem = source_archive_path.name.removesuffix(".tar.gz")
+    return source_archive_path.with_name(stem.replace("_source-archive_", "_source-map_") + ".csv")
 
 
 def _process_subject(
     subject: CapturedSubject,
     run: Run,
+    source_archive_path: Path,
     *,
     sanitise_requested: bool,
     sanitise_level: str,
@@ -162,7 +173,10 @@ def _process_subject(
         )
     output_token = _random_output_token(used_output_tokens)
     reports_dir = _reports_dir_for(run, subject_label, output_token)
-    write_source_manifest(subject, reports_dir)
+    # A sanitised run's reports name files by position, never by the source
+    # filename, folder or UID, which can carry a participant code or scan time.
+    names = pseudonymous_source_names(subject.files) if sanitise_requested else None
+    write_source_manifest(subject, reports_dir, names=names)
 
     def _bind_progress(description: str) -> Callable[[int, int], None] | None:
         if on_archive_progress is None:
@@ -173,13 +187,17 @@ def _process_subject(
     audit_result = _run_stage(f"{subject_prefix}: auditing", lambda: audit(subject), on_stage)
     if on_audit is not None:
         on_audit(audit_result)
-    write_audit_report(audit_result, reports_dir, subject_label=subject_label)
+    write_audit_report(
+        pseudonymised_audit(audit_result, names) if names else audit_result,
+        reports_dir,
+        subject_label=subject_label,
+    )
 
     sift_result = _run_stage(
         f"{subject_prefix}: sorting review files", lambda: sift(audit_result), on_stage
     )
-    write_retained_manifest(sift_result, reports_dir)
-    write_review_manifest(sift_result, reports_dir)
+    write_retained_manifest(sift_result, reports_dir, names=names)
+    write_review_manifest(sift_result, reports_dir, names=names)
 
     rectify_result = _run_stage(
         f"{subject_prefix}: rectifying retained files", lambda: rectify(sift_result), on_stage
@@ -235,6 +253,7 @@ def _process_subject(
         rectify_review_result=rectify_review_result,
         review_archive=review_archive,
         review_sanitised=sanitise_requested,
+        names=names,
     )
 
     finalise_description = f"{subject_prefix}: creating verified archive"
@@ -260,7 +279,18 @@ def _process_subject(
         audit_result=audit_result,
         rectify_result=rectify_result,
         sanitise_result=sanitise_result,
+        names=names,
     )
+    if names:
+        write_source_map(
+            _source_map_path(source_archive_path),
+            sift_result=sift_result,
+            rectify_result=rectify_result,
+            rectify_review_result=rectify_review_result,
+            sanitise_result=sanitise_result,
+            sanitise_review_result=sanitise_review_result,
+            names=names,
+        )
 
     if keep_unzipped:
         final_dir = _final_dir_for(run, subject_label, output_token)
@@ -336,7 +366,7 @@ def run_pipeline(
         used_output_tokens: set[str] = set()
         for subject in subjects:
             archive_source_description = f"Study {subject.output_number}: archiving source DICOMs"
-            _run_stage(
+            source_archive_result = _run_stage(
                 archive_source_description,
                 partial(
                     _archive_source_subject,
@@ -350,6 +380,7 @@ def run_pipeline(
             _process_subject(
                 subject,
                 run,
+                source_archive_result.path,
                 sanitise_requested=sanitise_requested,
                 sanitise_level=sanitise_level,
                 label_mode=label_mode,

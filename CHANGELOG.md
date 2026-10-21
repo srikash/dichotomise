@@ -8,6 +8,17 @@ finished output, but found 1". `rectify` now writes such a copy once, as the REA
 already said, and `stage-02-report.json` reports how many were skipped as
 `retained_identical_files_not_rewritten`.
 
+Change to `--sanitise` reports: the files in `reports/` no longer carry source names. Source
+filenames, folder names and the original SeriesInstanceUID can hold a participant code, the scan
+date and time, or the original SOP Instance UID (Siemens exports often name files after it). A
+sanitised run now lists files as `folder-NN/NNNN` in the manifests, `stage-01` (report and CSV, NOTES
+included) and `stage-02`, and `stage-03` shows the reissued SeriesInstanceUID (under `retain`, which reissues no UIDs,
+`stage-03` still shows the original ones, as the archive does). The way back to the real
+names is `<patient-id>_<hex>_source-map_<timestamp>.csv` in `archives/`, beside the source archive,
+which already holds the real identity. Unsanitised runs, `--qc` and the printed NOTES are unchanged.
+
+Also: the audit's duplicate note used the filename `.dcm` even for files without that extension.
+
 ## v2.7.1
 
 - Docs only, plus one help string. README: `--qc` prints the audit table and NOTES (the `--qc` help

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 import shutil
@@ -410,6 +411,79 @@ def test_run_pipeline_sanitised_reports_never_contain_the_real_patient_id(
 
     for report_file in run.reports_dir.rglob("*.json"):
         assert real_patient_id not in report_file.read_text()
+
+
+def _export_with_identifying_names(source: Path, make_dicom_file: Callable[..., Path]) -> list[str]:
+    """Write one retained file and one duplicate named after identifiers; return those names."""
+    folder = source / "M0450__secret-folder"
+    series = {
+        "PatientID": "sub-01",
+        "StudyInstanceUID": "9.8.7.6.0",
+        "SeriesInstanceUID": "9.8.7.6.5",
+        "SeriesNumber": 21,
+        "InstanceNumber": 1,
+        "SOPInstanceUID": "9.8.7.6.1",
+    }
+    original = make_dicom_file(folder / "MRe.9.8.7.6.1", **series)
+    shutil.copy2(original, folder / "MRe.9.8.7.6.2")
+    return ["M0450__secret-folder", "MRe.9.8.7.6", "9.8.7.6.1", "9.8.7.6.5", "9.8.7.6.0"]
+
+
+def test_run_pipeline_sanitised_reports_never_contain_source_names_or_uids(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    identifying = _export_with_identifying_names(source, make_dicom_file)
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=True)
+
+    report_files = [path for path in run.reports_dir.rglob("*") if path.is_file()]
+    assert report_files
+    for report_file in report_files:
+        text = report_file.read_text()
+        for token in identifying:
+            assert token not in text, f"{token} leaked into {report_file.name}"
+    reports_dir = next(run.reports_dir.iterdir())
+    sift_report = json.loads((reports_dir / "stage-02-report.json").read_text())
+    assert sift_report["review"] == [{"file": "folder-01/0002", "reason": "duplicate"}]
+    audit_report = json.loads((reports_dir / "stage-01-report.json").read_text())
+    assert audit_report["duplicates"] == ["folder-01"]
+    assert "folder-01/0001" in (reports_dir / "source-manifest.csv").read_text()
+
+
+def test_run_pipeline_sanitised_run_writes_a_source_map_beside_the_source_archive(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    _export_with_identifying_names(source, make_dicom_file)
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=True)
+
+    (source_map,) = run.archives_dir.glob("*_source-map_*.csv")
+    (source_archive,) = run.archives_dir.glob("*_source-archive_*.tar.gz")
+    assert source_map.name.removesuffix(".csv").replace(
+        "_source-map_", "_source-archive_"
+    ) == source_archive.name.removesuffix(".tar.gz")
+    rows = {row["report_name"]: row for row in csv.DictReader(source_map.read_text().splitlines())}
+    assert rows["folder-01/0001"]["source_file"] == "M0450__secret-folder/MRe.9.8.7.6.1"
+    assert rows["folder-01/0001"]["status"] == "retained"
+    assert rows["folder-01/0001"]["final_file"].endswith("_e01.dcm")
+    assert rows["folder-01/0002"]["source_file"] == "M0450__secret-folder/MRe.9.8.7.6.2"
+    assert rows["folder-01/0002"]["status"] == "review:duplicate"
+    assert rows["folder-01/0002"]["final_file"].endswith("_e01.dcm")
+
+
+def test_run_pipeline_unsanitised_reports_keep_the_real_names_and_write_no_source_map(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    _export_with_identifying_names(source, make_dicom_file)
+
+    run = run_pipeline(source, tmp_path / "out")
+
+    reports_dir = next(run.reports_dir.iterdir())
+    assert "M0450__secret-folder/MRe.9.8.7.6.1" in (reports_dir / "source-manifest.csv").read_text()
+    assert not list(run.archives_dir.glob("*_source-map_*"))
 
 
 def test_run_pipeline_sends_sop_uid_conflicts_to_review_without_failing(
