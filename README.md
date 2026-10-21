@@ -1,4 +1,4 @@
-# dichotomise [![Version](https://img.shields.io/badge/version-2.7.4-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.7.4) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
+# dichotomise [![Version](https://img.shields.io/badge/version-2.8.0-purple.svg)](https://github.com/srikash/dichotomise/releases/tag/v2.8.0) [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE) [![CI](https://github.com/srikash/dichotomise/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/srikash/dichotomise/actions/workflows/ci.yml) [![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)
 
 <b><ins>DIC</ins></b>h<b><ins>O</ins></b>to<b><ins>M</ins></b>ise is a command-line tool for checking, sorting, renaming,
 de-identifying, and archiving DICOM exports from Siemens XA60+ systems.
@@ -281,10 +281,10 @@ installing Python packages directly isn't an option.
 
 ```bash
 # Docker
-docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.7.4 --help
+docker run --rm -v "$PWD:/data" ghcr.io/srikash/dichotomise:2.8.0 --help
 
 # Apptainer / Singularity
-apptainer run oras://ghcr.io/srikash/dichotomise:2.7.4-sif --help
+apptainer run oras://ghcr.io/srikash/dichotomise:2.8.0-sif --help
 ```
 
 Mount your source and output directories under `/data` (the image's working
@@ -304,7 +304,7 @@ since it delegates straight into the containerized CLI), auto-detects
 ```
 
 Set `DICHOTOMISE_ENGINE=docker|apptainer` to force an engine, and
-`DICHOTOMISE_VERSION=2.7.4` (default `latest`) to pin a release.
+`DICHOTOMISE_VERSION=2.8.0` (default `latest`) to pin a release.
 
 ## Usage
 

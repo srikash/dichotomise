@@ -27,7 +27,7 @@ sharing.
 - Faster. Sanitising walks each file's datasets once instead of once per policy field (an Enhanced MR
   file with the `minimal` policy: 54 ms to 13 ms), and exports of 200 files or more have their headers
   read by several processes (`--qc` on 8294 files: 28 s to 3 s). A four-subject sanitised run went from
-  10 min 10 s to 4 min 43 s. Output is unchanged. If you call `iter_dicom_metadata` from your own
+  A four-subject sanitised run (8294 files) took 10 min 10 s with v2.7.4's code and takes 4 min 32 s now, UID remapping included. The speedups do not change output. If you call `iter_dicom_metadata` from your own
   script, put the call under `if __name__ == "__main__":`.
 
 ## v2.7.4

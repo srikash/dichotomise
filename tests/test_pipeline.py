@@ -860,4 +860,4 @@ def test_run_pipeline_finishes_when_every_file_of_a_subject_goes_to_review(
     sift_report = json.loads((reports_dir / "stage-02-report.json").read_text())
     assert sift_report["retained_count"] == 0
     assert sift_report["review_count"] == 2
-    assert (run.archives_dir).glob("*_review-archive_*.tar.gz")
+    assert len(list(run.archives_dir.glob("*_review-archive_*.tar.gz"))) == 1
