@@ -26,6 +26,7 @@ class RectifyResult:
     subject: CapturedSubject
     rectified_dir: Path
     files: list[DicomMetadata]
+    merged_identical_count: int = 0
 
 
 def rectify(sift_result: SiftResult) -> RectifyResult:
@@ -33,7 +34,8 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
 
     A byte-identical file that lands on a name already written is the same
     file again (for example a copy of an export in another folder), so it is
-    not written or listed a second time. Two different scan files that would
+    not written or listed a second time (`merged_identical_count` counts
+    them). Two different scan files that would
     land on the exact same rectified name is a real ambiguity about which
     file the name belongs to, so it stops the run rather than silently
     picking one or numbering around it.
@@ -41,6 +43,7 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
     rectified_dir = sift_result.subject.working_dir / "rectify"
     occupied: dict[Path, DicomMetadata] = {}
     files: list[DicomMetadata] = []
+    merged_identical_count = 0
 
     for metadata in sift_result.retained:
         target = rectified_path(rectified_dir, metadata)
@@ -50,13 +53,19 @@ def rectify(sift_result: SiftResult) -> RectifyResult:
                     f"Two different scan files would both be named {target.name}: "
                     f"{occupied[target].path} and {metadata.path}"
                 )
+            merged_identical_count += 1
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(metadata.path, target)
         occupied[target] = metadata
         files.append(replace(metadata, path=target))
 
-    return RectifyResult(subject=sift_result.subject, rectified_dir=rectified_dir, files=files)
+    return RectifyResult(
+        subject=sift_result.subject,
+        rectified_dir=rectified_dir,
+        files=files,
+        merged_identical_count=merged_identical_count,
+    )
 
 
 @dataclass(frozen=True)

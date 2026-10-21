@@ -97,6 +97,7 @@ def test_rectify_writes_a_byte_identical_repeat_in_another_folder_only_once(
     expected = result.rectified_dir / "021-diffusion" / "021_0001_sop-1_e01.dcm"
     assert [f.path for f in result.files] == [expected]
     assert expected.read_bytes() == b"same bytes"
+    assert result.merged_identical_count == 1
 
 
 def test_rectify_raises_when_two_different_files_would_share_a_name(

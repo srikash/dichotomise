@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.7.2
+
+Fix: a byte-identical copy of a file in another folder (for example two copies of one
+export under one `--source-dir`) made the run fail at finalise with "Expected 2 file(s) in the
+finished output, but found 1". `rectify` now writes such a copy once, as the README and v2.7.1
+already said, and `stage-02-report.json` reports how many were skipped as
+`retained_identical_files_not_rewritten`.
+
 ## v2.7.1
 
 - Docs only, plus one help string. README: `--qc` prints the audit table and NOTES (the `--qc` help

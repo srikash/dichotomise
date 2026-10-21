@@ -476,6 +476,9 @@ def test_run_pipeline_collapses_a_byte_identical_copy_in_another_folder(
         (next(run.reports_dir.iterdir()) / "stage-01-report.json").read_text()
     )
     assert audit_report["duplicate_count"] == 0
+    sift_report = json.loads((next(run.reports_dir.iterdir()) / "stage-02-report.json").read_text())
+    assert sift_report["retained_count"] == 2
+    assert sift_report["retained_identical_files_not_rewritten"] == 1
 
 
 def test_run_pipeline_sanitised_archives_name_files_after_the_regenerated_uid(

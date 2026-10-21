@@ -231,6 +231,7 @@ def _process_subject(
     write_sift_report(
         sift_result,
         reports_dir,
+        rectify_result=rectify_result,
         rectify_review_result=rectify_review_result,
         review_archive=review_archive,
         review_sanitised=sanitise_requested,

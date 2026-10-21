@@ -176,6 +176,7 @@ def test_write_sift_report_records_retained_and_review_counts(tmp_path: Path) ->
     assert data["review_count"] == 1
     assert data["review"] == [{"file": "021-DWI/2.dcm", "reason": "duplicate"}]
     assert data["review_rename_collisions"] == 0
+    assert data["retained_identical_files_not_rewritten"] == 0
     assert data["review_archive"] is None
     assert data["review_archive_checksum"] is None
     assert data["review_archive_sanitised"] is False

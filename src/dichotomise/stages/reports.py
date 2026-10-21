@@ -135,6 +135,7 @@ def write_sift_report(
     sift_result: SiftResult,
     reports_dir: Path,
     *,
+    rectify_result: RectifyResult | None = None,
     rectify_review_result: RectifyReviewResult | None = None,
     review_archive: Archive | None = None,
     review_sanitised: bool = False,
@@ -150,6 +151,9 @@ def write_sift_report(
     data = {
         "stage": "sift",
         "retained_count": len(sift_result.retained),
+        "retained_identical_files_not_rewritten": (
+            rectify_result.merged_identical_count if rectify_result is not None else 0
+        ),
         "review_count": len(sift_result.review),
         "review": review,
         "review_rename_collisions": (
