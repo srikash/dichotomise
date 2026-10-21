@@ -110,6 +110,19 @@ def audit_directory(directory: Path) -> list[AuditResult]:
     return results
 
 
+_DICOM_SUFFIXES = (".dcm", ".ima", ".dicom")
+
+
+def _is_named_after_own_uid(item: DicomMetadata) -> bool:
+    """Whether the file's name ends with its own SOP Instance UID, ignoring a DICOM extension."""
+    name = item.path.name
+    for suffix in _DICOM_SUFFIXES:
+        if name.lower().endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return bool(item.sop_instance_uid) and name.endswith(item.sop_instance_uid)
+
+
 def _is_multi_series_folder(items: Sequence[DicomMetadata]) -> bool:
     """Whether one physical folder evidently holds several series rather than one.
 
@@ -123,10 +136,7 @@ def _is_multi_series_folder(items: Sequence[DicomMetadata]) -> bool:
     series = {item.series_instance_uid for item in items}
     if len(series) >= 3:
         return True
-    named_by_uid = sum(
-        bool(item.sop_instance_uid) and item.path.name.endswith(item.sop_instance_uid)
-        for item in items
-    )
+    named_by_uid = sum(_is_named_after_own_uid(item) for item in items)
     return len(series) >= 2 and named_by_uid * 2 > len(items)
 
 

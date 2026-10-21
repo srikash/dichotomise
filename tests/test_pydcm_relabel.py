@@ -348,3 +348,78 @@ def test_apply_policy_removes_a_sequence_that_nests_itself_and_the_fields_inside
     assert "ContentSequence" not in dataset
     assert "ContentSequence" not in dataset.ReferencedStudySequence[0]
     assert "secret" not in repr(dataset)
+
+
+def _referencing_pair() -> tuple[Dataset, Dataset]:
+    """A presentation-state-like file that refers to an image by its SOP Instance UID."""
+    image = Dataset()
+    image.PatientID = "real-id"
+    image.SOPInstanceUID = "1.2.3.2"
+    image.SOPClassUID = "1.2.840.10008.5.1.4.1.1.4"
+    state = Dataset()
+    state.PatientID = "real-id"
+    state.SOPInstanceUID = "1.2.3.1"
+    state.SOPClassUID = "1.2.840.10008.5.1.4.1.1.11.1"
+    state.DimensionOrganizationUID = "1.3.12.2.1107.5.2.9"
+    state.ReferencedImageSequence = [
+        _item(
+            ReferencedSOPClassUID="1.2.840.10008.5.1.4.1.1.4",
+            ReferencedSOPInstanceUID="1.2.3.2",
+        )
+    ]
+    state.ContentSequence = [_item(CodingSchemeUID="1.3.12.2.1107.5.2")]
+    return state, image
+
+
+def _sanitise_both(policy_name: str) -> tuple[Dataset, Dataset]:
+    state, image = _referencing_pair()
+    policy = load_policy(policy_name)
+    cache: dict[str, str] = {}
+    for dataset in (state, image):
+        apply_policy(
+            dataset, policy, subject_label="sub-0001", scan_date="20260101", replacement_cache=cache
+        )
+    return state, image
+
+
+@pytest.mark.parametrize("policy_name", ["standard", "minimal", "full"])
+def test_apply_policy_remaps_referenced_uids_to_the_new_instance_uids(policy_name: str) -> None:
+    state, image = _sanitise_both(policy_name)
+
+    reference = state.ReferencedImageSequence[0].ReferencedSOPInstanceUID
+    assert image.SOPInstanceUID != "1.2.3.2"
+    assert reference == image.SOPInstanceUID
+    assert state.DimensionOrganizationUID != "1.3.12.2.1107.5.2.9"
+
+
+def test_apply_policy_leaves_class_scheme_and_registry_uids_alone() -> None:
+    state, image = _sanitise_both("standard")
+
+    assert state.SOPClassUID == "1.2.840.10008.5.1.4.1.1.11.1"
+    assert image.SOPClassUID == "1.2.840.10008.5.1.4.1.1.4"
+    assert state.ReferencedImageSequence[0].ReferencedSOPClassUID == "1.2.840.10008.5.1.4.1.1.4"
+    assert state.ContentSequence[0].CodingSchemeUID == "1.3.12.2.1107.5.2"
+
+
+def test_apply_policy_retain_keeps_every_original_uid() -> None:
+    state, image = _sanitise_both("retain")
+
+    assert state.ReferencedImageSequence[0].ReferencedSOPInstanceUID == "1.2.3.2"
+    assert state.DimensionOrganizationUID == "1.3.12.2.1107.5.2.9"
+    assert image.SOPInstanceUID == "1.2.3.2"
+
+
+def test_apply_policy_respects_an_explicit_keep_for_a_uid_field() -> None:
+    state, _ = _referencing_pair()
+    policy = Policy(
+        name="test",
+        actions={
+            "SOPInstanceUID": {"action": "regenerate"},
+            "DimensionOrganizationUID": {"action": "keep"},
+        },
+    )
+
+    apply_policy(state, policy, subject_label="s", scan_date="", replacement_cache={})
+
+    assert state.SOPInstanceUID != "1.2.3.1"
+    assert state.DimensionOrganizationUID == "1.3.12.2.1107.5.2.9"

@@ -74,16 +74,17 @@ def pseudonymised_audit(
     descriptions still work without printing them.
     """
     labels: dict[str, str] = {}
-    groups: dict[Path, list[Path]] = {}
+    groups: dict[Path, dict[Path, int]] = {}
     for audited_file in audit_result.files:
         group = audited_file.series_folder
-        if group is not None and group not in groups.setdefault(group.parent, []):
-            groups[group.parent].append(group)
+        if group is not None:
+            groups.setdefault(group.parent, {})[group] = audited_file.metadata.series_number
+    # Numbered by the series number, never by the label, which starts with the description.
     series_number = {
         group: number
         for siblings in groups.values()
         for number, group in enumerate(
-            sorted(siblings, key=lambda item: (natural_sort_key(item.name), item)), 1
+            sorted(siblings, key=lambda item: (siblings[item], natural_sort_key(item.name))), 1
         )
     }
 

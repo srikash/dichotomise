@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pydicom
-from pydicom.datadict import dictionary_VR, tag_for_keyword
+from pydicom.datadict import dictionary_VR, keyword_for_tag, tag_for_keyword
 from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
 from pydicom.uid import generate_uid
@@ -256,12 +256,93 @@ def _cached_value(
     return replacement_cache[key]
 
 
+# UIDs that name a class, a transfer syntax or a coding scheme rather than one instance. They
+# are shared by every site, so they stay as they are (DICOM PS3.15 Annex E remaps instance
+# and collection UIDs, not these). Registry UIDs (1.2.840.10008.*) stay too.
+_KEPT_UID_KEYWORDS = frozenset(
+    {
+        "SOPClassUID",
+        "ReferencedSOPClassUID",
+        "ReferencedSOPClassUIDInFile",
+        "MediaStorageSOPClassUID",
+        "RelatedGeneralSOPClassUID",
+        "OriginalSpecializedSOPClassUID",
+        "TransferSyntaxUID",
+        "ReferencedTransferSyntaxUIDInFile",
+        "ImplementationClassUID",
+        "CodingSchemeUID",
+        "MappingResourceUID",
+        "ContextGroupExtensionCreatorUID",
+        "TemplateExtensionCreatorUID",
+        "TemplateExtensionOrganizationUID",
+    }
+)
+_REGISTRY_UID_PREFIX = "1.2.840.10008."
+_NEW_UID_MARK = "uid-new:"
+
+
+def _new_uid_for(original: str, replacement_cache: MutableMapping[str, str]) -> str:
+    """The replacement for one UID value, the same wherever and under whatever keyword it appears.
+
+    Keyed by the value, not the field, so an image's SOPInstanceUID and the
+    ReferencedSOPInstanceUID that points at it come out equal.
+    """
+    key = f"uid:{original}"
+    if key not in replacement_cache:
+        replacement_cache[key] = str(generate_uid())
+        replacement_cache[_NEW_UID_MARK + replacement_cache[key]] = original
+    return replacement_cache[key]
+
+
 def _regenerate_field(
     dataset: Dataset, field: str, replacement_cache: MutableMapping[str, str]
 ) -> None:
-    new_value = _cached_value(dataset, field, replacement_cache, lambda _original: generate_uid())
-    if new_value is not None:
-        setattr(dataset, field, new_value)
+    original = str(getattr(dataset, field, "")).strip()
+    if original:
+        setattr(dataset, field, _new_uid_for(original, replacement_cache))
+
+
+def _remap_remaining_uids(
+    index: dict[int, list[Dataset]],
+    explicit_fields: set[str],
+    replacement_cache: MutableMapping[str, str],
+) -> None:
+    """Replace every UID value the policy's own actions did not handle.
+
+    Skipped: class and scheme UIDs, registry UIDs, fields the policy names
+    itself (it chose keep, remove or replace for those), and values that are
+    already replacements.
+    """
+    for tag, holders in index.items():
+        keyword = keyword_for_tag(tag)
+        if keyword in _KEPT_UID_KEYWORDS or keyword in explicit_fields:
+            continue
+        try:
+            vr = dictionary_VR(tag)
+        except KeyError:  # a private element: use the VR the file states
+            vr = holders[0].get_item(tag).VR
+        if vr != "UI":
+            continue
+        for holder in holders:
+            if tag not in holder:
+                continue
+            element = holder[tag]
+            many = element.VM > 1
+            values = (
+                [str(value).strip() for value in element.value]
+                if many
+                else [str(element.value).strip()]
+            )
+            remapped = [
+                value
+                if not value
+                or value.startswith(_REGISTRY_UID_PREFIX)
+                or (_NEW_UID_MARK + value) in replacement_cache
+                else _new_uid_for(value, replacement_cache)
+                for value in values
+            ]
+            if remapped != values:
+                element.value = remapped if many else remapped[0]
 
 
 def _scramble_date(original: str, field: str) -> str:
@@ -406,8 +487,13 @@ def apply_policy(
                 placeholders,
                 replacement_cache,
             )
-        if action in ("add", "add_code_sequence") or (action == "remove" and _is_sequence_tag(tag)):
+        if action in ("add", "add_code_sequence") or _is_sequence_tag(tag):
             index = _index_by_tag(dataset)
+    if policy.actions.get("SOPInstanceUID", {}).get("action") == "regenerate":
+        explicit = {
+            field for field, found in policy.actions.items() if found["action"] != "regenerate"
+        }
+        _remap_remaining_uids(index, explicit, replacement_cache)
     _sync_file_meta_sop_instance_uid(dataset)
 
 

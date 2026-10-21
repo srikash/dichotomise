@@ -776,3 +776,88 @@ def test_run_pipeline_sanitised_archives_name_files_after_the_regenerated_uid(
             names = [m.name for m in tar.getmembers() if m.isfile()]
         assert names
         assert all(original_uid not in name for name in names)
+
+
+def test_run_pipeline_numbers_series_by_series_number_not_by_hidden_description(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    for number, description in ((5, "zzz-first-alphabetically-last"), (6, "aaa-second")):
+        for instance in (1, 2):
+            sop = f"9.8.{number}.{instance}"
+            make_dicom_file(
+                source / "all" / f"MRe.{sop}",
+                PatientID="sub-01",
+                StudyInstanceUID="9.8.0",
+                SeriesInstanceUID=f"9.8.{number}",
+                SeriesNumber=number,
+                SeriesDescription=description,
+                ProtocolName=description,
+                InstanceNumber=instance,
+                SOPInstanceUID=sop,
+            )
+    for number in (7, 8):
+        make_dicom_file(
+            source / "all" / f"MRe.9.8.{number}.1",
+            PatientID="sub-01",
+            StudyInstanceUID="9.8.0",
+            SeriesInstanceUID=f"9.8.{number}",
+            SeriesNumber=number,
+            SeriesDescription="other",
+            ProtocolName="other",
+            SOPInstanceUID=f"9.8.{number}.1",
+        )
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=True, sanitise_level="full")
+
+    reports_dir = next(run.reports_dir.iterdir())
+    audit_report = json.loads((reports_dir / "stage-01-report.json").read_text())
+    counts = {row["series_folder"]: row["dicom_count"] for row in audit_report["series"]}
+    assert counts == {"series-001": 2, "series-002": 2, "series-003": 1, "series-004": 1}
+
+
+def test_run_pipeline_pseudonymises_two_single_folder_subfolders_separately(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    for folder in ("first-secret", "second-secret"):
+        for number in (3, 4, 5):
+            sop = f"9.{folder[:1]}.{number}"
+            make_dicom_file(
+                source / folder / f"MRe.{sop}",
+                PatientID="sub-01",
+                StudyInstanceUID="9.8.0",
+                SeriesInstanceUID=sop,
+                SeriesNumber=number,
+                SeriesDescription=f"scan{number}",
+                ProtocolName=f"scan{number}",
+                SOPInstanceUID=sop,
+            )
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=True)
+
+    for report_file in run.reports_dir.rglob("*"):
+        if report_file.is_file():
+            text = report_file.read_text()
+            assert "first-secret" not in text and "second-secret" not in text
+    reports_dir = next(run.reports_dir.iterdir())
+    audit_report = json.loads((reports_dir / "stage-01-report.json").read_text())
+    assert [row["dicom_count"] for row in audit_report["series"]] == [1, 1, 1, 1, 1, 1]
+    assert audit_report["misfiled_count"] == 0
+
+
+def test_run_pipeline_finishes_when_every_file_of_a_subject_goes_to_review(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    shared = {"PatientID": "sub-01", "StudyInstanceUID": "1.2.1", "SOPInstanceUID": "1.2.3.9"}
+    make_dicom_file(source / "s" / "1.dcm", InstanceNumber=1, **shared)
+    make_dicom_file(source / "s" / "2.dcm", InstanceNumber=1, ProtocolName="other", **shared)
+
+    run = run_pipeline(source, tmp_path / "out", sanitise_requested=True)
+
+    reports_dir = next(run.reports_dir.iterdir())
+    sift_report = json.loads((reports_dir / "stage-02-report.json").read_text())
+    assert sift_report["retained_count"] == 0
+    assert sift_report["review_count"] == 2
+    assert (run.archives_dir).glob("*_review-archive_*.tar.gz")

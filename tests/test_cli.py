@@ -460,3 +460,15 @@ def test_cli_random_name_conflicting_with_sanitise_policy_is_an_error(
 
     assert result.exit_code != 0
     assert "--random-name" in result.output
+
+
+def test_cli_qc_labels_a_subject_without_a_patient_id(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="", StudyInstanceUID="study-a")
+
+    result = CliRunner().invoke(cli, ["--source-dir", str(source), "--qc"])
+
+    assert result.exit_code == 0, result.output
+    assert "no PatientID" in result.output

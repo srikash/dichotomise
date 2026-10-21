@@ -290,3 +290,44 @@ def test_audit_still_flags_a_stray_file_in_a_one_series_folder(
 
     assert {f.metadata.path.name for f in result.files if f.is_misfiled} == {"22-1.dcm"}
     assert {f.folder for f in result.files} == {folder}
+
+
+def _extension_named(number: int, instance: int, sop: str) -> str:
+    return f"{sop}.dcm"
+
+
+def test_audit_treats_files_named_by_their_uid_with_an_extension_as_a_single_folder_export(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "flat"
+    _write_series(make_dicom_file, folder, [(9, 8), (12, 3)], name=_extension_named)
+
+    result = audit(_subject(folder))
+
+    assert not any(f.is_misfiled for f in result.files)
+    assert len({f.folder for f in result.files}) == 2
+
+
+def test_audit_does_not_mistake_a_shorter_uid_inside_a_longer_one_for_the_file_name(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "021-DWI"
+    for instance in range(1, 7):
+        make_dicom_file(
+            folder / f"{instance}.dcm",
+            SeriesInstanceUID="1.2.9",
+            SeriesNumber=9,
+            InstanceNumber=instance,
+            SOPInstanceUID=f"1.2.9.{instance}",
+        )
+    make_dicom_file(
+        folder / "stray-1.2.9.1.dcm",
+        SeriesInstanceUID="1.2.7",
+        SeriesNumber=7,
+        InstanceNumber=1,
+        SOPInstanceUID="1.2.9.1",
+    )
+
+    result = audit(_subject(folder))
+
+    assert {f.metadata.path.name for f in result.files if f.is_misfiled} == {"stray-1.2.9.1.dcm"}

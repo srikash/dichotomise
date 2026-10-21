@@ -311,7 +311,7 @@ def _print_subject_audits(source_dir: Path) -> None:
     for result in results:
         subject = result.subject
         console.print(
-            f"\n[bold]Subject {escape(subject.subject_id)}[/] "
+            f"\n[bold]Subject {escape(subject.subject_id or '(no PatientID)')}[/] "
             f"(study {escape(subject.scan_date or 'date unknown')}, {len(result.files)} DICOMs)"
         )
         _print_audit_table(result)
