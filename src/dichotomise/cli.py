@@ -569,7 +569,9 @@ def _prepare_processing_options(
     "--qc",
     is_flag=True,
     panel="QC mode",
-    help="Audit source DICOMs in place and print the audit table and NOTES only; never write files.",
+    help=(
+        "Audit source DICOMs in place and print the audit table and NOTES only; never write files."
+    ),
 )
 @click.option(
     "--sanitise",
