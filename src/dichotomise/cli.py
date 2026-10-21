@@ -305,11 +305,23 @@ def _latest_modified(files: list[AuditedFile]) -> str:
     return datetime.fromtimestamp(modified_time, UTC).strftime("%Y-%m-%d %H:%MZ")
 
 
+def _print_subject_audits(source_dir: Path) -> None:
+    """Audit the source directory in place and print each subject's table and NOTES in turn."""
+    results = audit_directory(source_dir)
+    for result in results:
+        subject = result.subject
+        console.print(
+            f"\n[bold]Subject {escape(subject.subject_id)}[/] "
+            f"(study {escape(subject.scan_date or 'date unknown')}, {len(result.files)} DICOMs)"
+        )
+        _print_audit_table(result)
+
+
 def _print_audit_table(audit_result: AuditResult) -> None:
     """Render every captured series with its structural and metadata findings."""
     files_by_folder: dict[Path, list[AuditedFile]] = defaultdict(list)
     for file in audit_result.files:
-        files_by_folder[file.metadata.path.parent].append(file)
+        files_by_folder[file.folder].append(file)
 
     table = Table(title="DICOM inventory", show_lines=False)
     table.add_column("Series folder", overflow="fold")
@@ -480,9 +492,7 @@ def _run_qc(
     _print_qc_mode_line()
     qc_started = monotonic()
     try:
-        _run_with_elapsed_ticker(
-            qc_started, lambda: _print_audit_table(audit_directory(source_dir))
-        )
+        _run_with_elapsed_ticker(qc_started, lambda: _print_subject_audits(source_dir))
     except DichotomiseError as failure:
         error(str(failure))
         raise SystemExit(1) from failure

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +46,18 @@ def _subject_folder_name(metadata: DicomMetadata, used_names: dict[str, int]) ->
     return base_name if occurrence == 1 else f"{base_name}-{occurrence:03d}"
 
 
+def group_by_subject(files: Iterable[DicomMetadata]) -> dict[tuple[str, str], list[DicomMetadata]]:
+    """Group files by (PatientID, StudyInstanceUID), in sorted key order.
+
+    The folder layout plays no part: one folder holding several subjects and
+    one subject spread over many folders both group correctly.
+    """
+    files_by_subject: dict[tuple[str, str], list[DicomMetadata]] = defaultdict(list)
+    for metadata in files:
+        files_by_subject[(metadata.patient_id, metadata.study_instance_uid)].append(metadata)
+    return {key: files_by_subject[key] for key in sorted(files_by_subject)}
+
+
 def capture(source_dir: Path, run: Run) -> list[CapturedSubject]:
     """Group every scan file under `source_dir` by subject, without copying any of them.
 
@@ -55,17 +68,14 @@ def capture(source_dir: Path, run: Run) -> list[CapturedSubject]:
     """
     reject_symlinks(source_dir)
 
-    files_by_subject: dict[tuple[str, str], list[DicomMetadata]] = defaultdict(list)
-    for metadata in iter_dicom_metadata(source_dir):
-        key = (metadata.patient_id, metadata.study_instance_uid)
-        files_by_subject[key].append(metadata)
+    files_by_subject = group_by_subject(iter_dicom_metadata(source_dir))
 
     if not files_by_subject:
         raise NoDicomFilesFoundError(f"No DICOM files were found under {source_dir}")
 
     used_names: dict[str, int] = {}
     captured: list[CapturedSubject] = []
-    for output_number, key in enumerate(sorted(files_by_subject), start=1):
+    for output_number, key in enumerate(files_by_subject, start=1):
         files = sorted(files_by_subject[key], key=lambda metadata: metadata.path)
         first = files[0]
         folder_name = _subject_folder_name(first, used_names)

@@ -167,9 +167,11 @@ One command runs the full pipeline, in order:
    first copy, `2.dcm` before `10.dcm`, is kept), files that share a
    SOP Instance UID with a file whose bytes differ (a metadata error, sent to
    review as `sop_conflict`, never called a duplicate; checked across the
-   whole study, or across the whole source directory under `--qc`), files sitting in the
-   wrong series folder, and inconsistent patient, study, or series metadata
-   within a physical DICOM folder. The CLI prints a Rich inventory table
+   whole study), files sitting in the wrong series folder, and inconsistent patient,
+   study, or series metadata within a series. Series come from the headers, not from the
+   layout: a folder of one series is checked for strays, and a folder that holds several
+   series (a whole study exported into one folder, with or without a `.dcm` extension) is
+   audited series by series. The CLI prints a Rich inventory table
    followed by a NOTES section that explains each finding in plain language
    (for example which file belongs to which series, and which files repeat
    which), and the reports include the same notes and a spreadsheet-friendly
@@ -312,8 +314,8 @@ To inspect an export without creating an output directory or saving a report:
 dichotomise --qc --source-dir ./study/sub-001
 ```
 
-`--qc` reads the DICOMs in place and prints the Rich audit table and NOTES
-section in the terminal. It never copies, changes, archives, or writes files.
+`--qc` reads the DICOMs in place and prints, for each subject found, the Rich audit
+table and NOTES section in the terminal. It never copies, changes, archives, or writes files.
 
 `--source-dir` accepts either one subject/session export or a scanner export
 containing multiple subjects. They are discovered from DICOM metadata, so

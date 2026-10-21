@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Fix: an export with every DICOM in one folder (no `.dcm` extension needed) had every file reported
+  as "misfiled", so a real run sent nearly all of it to review. The misfiled check assumed one series
+  per folder. A folder that holds several series is now audited series by series, by the headers, so
+  a sorted export and a single-folder export give the same result.
+- `--qc` now audits and prints each subject separately, as a normal run does, instead of one merged
+  table. SOP-UID conflicts are therefore checked within a subject in `--qc` too.
+
 ## v2.7.4
 
 This release also carries the changes prepared as v2.7.2 and v2.7.3, which were never published.

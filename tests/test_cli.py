@@ -92,6 +92,34 @@ def test_cli_help_groups_required_and_optional_flags() -> None:
     assert "--subject-id" not in result.output
 
 
+def test_cli_qc_prints_a_separate_table_for_each_subject(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "scanner_export"
+    for patient in ("sub-01", "sub-02"):
+        folder = source / patient
+        for number in (3, 4, 5):
+            make_dicom_file(
+                folder / f"s{number}.dcm",
+                PatientID=patient,
+                StudyInstanceUID=f"study-{patient}",
+                SeriesInstanceUID=f"1.2.{number}",
+                SeriesNumber=number,
+                SeriesDescription=f"scan{number}",
+                ProtocolName=f"scan{number}",
+            )
+
+    result = CliRunner().invoke(cli, ["--source-dir", str(source), "--qc"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count("DICOM inventory") == 2
+    assert "sub-01" in result.output
+    assert "sub-02" in result.output
+    assert "misfiled" not in result.output
+    for number in (3, 4, 5):
+        assert result.output.count(f"scan{number}_{number}") == 2
+
+
 def test_cli_qc_audits_in_place_without_creating_output(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:

@@ -87,11 +87,26 @@ def test_audit_directory_checks_source_files_in_place(
     source_dir = tmp_path / "source"
     dicom_file = make_dicom_file(source_dir / "series" / "1.dcm", PatientID="scanner-01")
 
-    result = audit_directory(source_dir)
+    (result,) = audit_directory(source_dir)
 
     assert result.subject.source_root == source_dir
     assert [file.metadata.path for file in result.files] == [dicom_file]
     assert list(source_dir.rglob("*")) == [source_dir / "series", dicom_file]
+
+
+def test_audit_directory_audits_each_subject_on_its_own(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source_dir = tmp_path / "scanner_export"
+    for patient, folder in (("sub-02", "second"), ("sub-01", "first")):
+        make_dicom_file(
+            source_dir / folder / "1.dcm", PatientID=patient, StudyInstanceUID=f"study-{patient}"
+        )
+
+    results = audit_directory(source_dir)
+
+    assert [result.subject.subject_id for result in results] == ["sub-01", "sub-02"]
+    assert [len(result.files) for result in results] == [1, 1]
 
 
 def test_audit_explains_a_folder_written_twice_with_one_misfiled_file(
@@ -189,3 +204,89 @@ def test_audit_names_extensionless_duplicates_by_their_real_filenames(
     notes = describe_findings(result.files)
     assert any("2 is a byte-identical copy of 1" in note for note in notes)
     assert not any(".dcm" in note for note in notes)
+
+
+def _write_series(
+    make_dicom_file: Callable[..., Path],
+    folder: Path,
+    specs: list[tuple[int, int]],
+    *,
+    name: Callable[[int, int, str], str],
+) -> None:
+    """Write `count` files for each (series number, count) spec into one `folder`."""
+    for number, count in specs:
+        for instance in range(1, count + 1):
+            sop = f"1.2.{number}.{instance}"
+            make_dicom_file(
+                folder / name(number, instance, sop),
+                StudyInstanceUID="1.2.1",
+                SeriesInstanceUID=f"1.2.{number}",
+                SeriesNumber=number,
+                SeriesDescription=f"desc{number}",
+                ProtocolName=f"proto{number}",
+                InstanceNumber=instance,
+                SOPInstanceUID=sop,
+            )
+
+
+def _uid_named(number: int, instance: int, sop: str) -> str:
+    return f"MRe.{sop}"
+
+
+def _plain_named(number: int, instance: int, sop: str) -> str:
+    return f"{number}-{instance}.dcm"
+
+
+def test_audit_does_not_call_files_misfiled_when_one_folder_holds_two_series(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "flat"
+    _write_series(make_dicom_file, folder, [(9, 8), (12, 3)], name=_uid_named)
+
+    result = audit(_subject(folder))
+
+    assert not any(f.is_misfiled for f in result.files)
+    assert len({f.folder for f in result.files}) == 2
+
+
+def test_audit_does_not_call_files_misfiled_when_one_series_dominates_a_flat_folder(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "flat"
+    _write_series(
+        make_dicom_file, folder, [(9, 12), (20, 1), (21, 1), (22, 1), (23, 1)], name=_uid_named
+    )
+
+    result = audit(_subject(folder))
+
+    assert not any(f.is_misfiled for f in result.files)
+    assert len({f.folder for f in result.files}) == 5
+
+
+def test_audit_splits_a_folder_of_three_series_even_when_files_have_plain_names(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "flat"
+    _write_series(make_dicom_file, folder, [(9, 3), (12, 3), (13, 3)], name=_plain_named)
+
+    result = audit(_subject(folder))
+
+    assert not any(f.is_misfiled for f in result.files)
+    assert sorted(f.folder.name for f in {f.folder: f for f in result.files}.values()) == [
+        "desc12_12",
+        "desc13_13",
+        "desc9_9",
+    ]
+
+
+def test_audit_still_flags_a_stray_file_in_a_one_series_folder(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    folder = tmp_path / "021-DWI"
+    _write_series(make_dicom_file, folder, [(21, 6)], name=_plain_named)
+    _write_series(make_dicom_file, folder, [(22, 1)], name=_plain_named)
+
+    result = audit(_subject(folder))
+
+    assert {f.metadata.path.name for f in result.files if f.is_misfiled} == {"22-1.dcm"}
+    assert {f.folder for f in result.files} == {folder}

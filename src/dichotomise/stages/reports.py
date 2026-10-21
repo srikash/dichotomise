@@ -74,6 +74,24 @@ def pseudonymised_audit(
     descriptions still work without printing them.
     """
     labels: dict[str, str] = {}
+    groups: dict[Path, list[Path]] = {}
+    for audited_file in audit_result.files:
+        group = audited_file.series_folder
+        if group is not None and group not in groups.setdefault(group.parent, []):
+            groups[group.parent].append(group)
+    series_number = {
+        group: number
+        for siblings in groups.values()
+        for number, group in enumerate(
+            sorted(siblings, key=lambda item: (natural_sort_key(item.name), item)), 1
+        )
+    }
+
+    def shown_group(audited_file: AuditedFile) -> Path | None:
+        group = audited_file.series_folder
+        if group is None:
+            return None
+        return names[audited_file.metadata.path].parent / f"series-{series_number[group]:03d}"
 
     def shown(description: str) -> str:
         if not hide_series_descriptions:
@@ -89,6 +107,7 @@ def pseudonymised_audit(
                 series_description=shown(audited_file.metadata.series_description),
             ),
             duplicate_of=names[audited_file.duplicate_of] if audited_file.duplicate_of else None,
+            series_folder=shown_group(audited_file),
         )
         for audited_file in audit_result.files
     ]
@@ -106,7 +125,7 @@ def _audit_series_rows(audit_result: AuditResult) -> list[dict[str, object]]:
     """Summarise structural and metadata findings for each physical DICOM folder."""
     files_by_folder: dict[Path, list[AuditedFile]] = {}
     for audited_file in audit_result.files:
-        files_by_folder.setdefault(audited_file.metadata.path.parent, []).append(audited_file)
+        files_by_folder.setdefault(audited_file.folder, []).append(audited_file)
 
     rows: list[dict[str, object]] = []
     for folder, files in sorted(
@@ -167,11 +186,11 @@ def write_audit_report(audit_result: AuditResult, reports_dir: Path, *, subject_
     """
     series_rows = _audit_series_rows(audit_result)
     duplicates = sorted(
-        {file.metadata.path.parent.name for file in audit_result.files if file.is_duplicate},
+        {file.folder.name for file in audit_result.files if file.is_duplicate},
         key=natural_sort_key,
     )
     misfiled = sorted(
-        {file.metadata.path.parent.name for file in audit_result.files if file.is_misfiled},
+        {file.folder.name for file in audit_result.files if file.is_misfiled},
         key=natural_sort_key,
     )
     data = {

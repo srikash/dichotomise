@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,8 +11,8 @@ from dichotomise.errors import NoDicomFilesFoundError
 from dichotomise.pydcm.acquisition import summarise_acquisition
 from dichotomise.pydcm.identify import find_duplicate_pairs, find_misfiled_files, find_sop_conflicts
 from dichotomise.pydcm.read import DicomMetadata, iter_dicom_metadata
-from dichotomise.stages.capture import CapturedSubject
-from dichotomise.utils.text import natural_sort_key
+from dichotomise.stages.capture import CapturedSubject, group_by_subject
+from dichotomise.utils.text import natural_sort_key, safe_filename_text
 
 _CONSISTENCY_FIELDS: tuple[tuple[str, str], ...] = (
     ("PatientID", "patient_id"),
@@ -41,6 +41,17 @@ class AuditedFile:
     is_misfiled: bool
     is_sop_conflict: bool = False
     duplicate_of: Path | None = None
+    series_folder: Path | None = None
+
+    @property
+    def folder(self) -> Path:
+        """The series-level group this file is audited in.
+
+        Normally its physical folder. For a folder that holds several series
+        (see `_is_multi_series_folder`) it is a label for the file's own
+        series, so the series checks never depend on how the export was laid out.
+        """
+        return self.series_folder or self.metadata.path.parent
 
 
 @dataclass(frozen=True)
@@ -76,35 +87,87 @@ def audit(subject: CapturedSubject) -> AuditResult:
     return _audit_files(subject.files, subject)
 
 
-def audit_directory(directory: Path) -> AuditResult:
-    """Audit DICOMs in place without creating a pipeline run or copying files."""
-    files = list(iter_dicom_metadata(directory))
-    if not files:
+def audit_directory(directory: Path) -> list[AuditResult]:
+    """Audit DICOMs in place, one result per subject, without creating a run or copying files."""
+    files_by_subject = group_by_subject(iter_dicom_metadata(directory))
+    if not files_by_subject:
         raise NoDicomFilesFoundError(f"No DICOM files were found under {directory}")
-    subject = CapturedSubject(
-        subject_id="QC",
-        patient_name="",
-        study_instance_uid="",
-        scan_date="",
-        scan_time="",
-        files=files,
-        source_root=directory,
-        working_dir=directory,  # unused: QC mode never writes, so there's nothing to anchor
+    results = []
+    for output_number, subject_files in enumerate(files_by_subject.values(), start=1):
+        first = subject_files[0]
+        subject = CapturedSubject(
+            subject_id=first.patient_id,
+            patient_name=first.patient_name,
+            study_instance_uid=first.study_instance_uid,
+            scan_date=first.study_date,
+            scan_time=first.study_time,
+            files=subject_files,
+            source_root=directory,
+            working_dir=directory,  # unused: QC mode never writes, so there's nothing to anchor
+            output_number=output_number,
+        )
+        results.append(_audit_files(subject_files, subject))
+    return results
+
+
+def _is_multi_series_folder(items: Sequence[DicomMetadata]) -> bool:
+    """Whether one physical folder evidently holds several series rather than one.
+
+    That is the case for 3 or more distinct SeriesInstanceUIDs, or for 2 or
+    more when most files are named after their own SOP Instance UID (the
+    scanner's single-folder export). A folder of one series with strays from
+    one other series is not: the strays are what the misfiled check finds.
+    Known limit: strays from two different other series look like a
+    container and are not flagged.
+    """
+    series = {item.series_instance_uid for item in items}
+    if len(series) >= 3:
+        return True
+    named_by_uid = sum(
+        bool(item.sop_instance_uid) and item.path.name.endswith(item.sop_instance_uid)
+        for item in items
     )
-    return _audit_files(files, subject)
+    return len(series) >= 2 and named_by_uid * 2 > len(items)
+
+
+def _series_folders(files_by_folder: Mapping[Path, Sequence[DicomMetadata]]) -> dict[Path, Path]:
+    """Give each file of a multi-series folder a label for its own series.
+
+    The label mirrors the scanner's `<description>_<number>_<modality>` folder
+    names, with a counter if two series would share one.
+    """
+    series_folder: dict[Path, Path] = {}
+    for folder, items in files_by_folder.items():
+        if not _is_multi_series_folder(items):
+            continue
+        first_of_series: dict[str, DicomMetadata] = {}
+        for item in items:
+            first_of_series.setdefault(item.series_instance_uid, item)
+        labels: dict[str, Path] = {}
+        used: Counter[str] = Counter()
+        for uid, item in sorted(
+            first_of_series.items(), key=lambda entry: (entry[1].series_number, entry[0])
+        ):
+            parts = [item.series_description, str(item.series_number), item.modality]
+            label = safe_filename_text("_".join(part for part in parts if part))
+            used[label] += 1
+            labels[uid] = folder / (label if used[label] == 1 else f"{label}-{used[label]}")
+        for item in items:
+            series_folder[item.path] = labels[item.series_instance_uid]
+    return series_folder
 
 
 def _audit_files(files: Sequence[DicomMetadata], subject: CapturedSubject) -> AuditResult:
     """Compute audit findings for a subject's DICOM files, wherever they sit on disk."""
     files_by_folder: dict[Path, list[Path]] = defaultdict(list)
-    metadata_by_folder: dict[str, list[DicomMetadata]] = defaultdict(list)
+    metadata_by_folder: dict[Path, list[DicomMetadata]] = defaultdict(list)
     metadata_by_path: dict[Path, DicomMetadata] = {}
 
     for metadata in files:
         path = metadata.path
         metadata_by_path[path] = metadata
         files_by_folder[path.parent].append(path)
-        metadata_by_folder[str(path.parent)].append(metadata)
+        metadata_by_folder[path.parent].append(metadata)
 
     if not metadata_by_path:
         raise NoDicomFilesFoundError(f"No DICOM files were found for subject {subject.subject_id}")
@@ -124,7 +187,12 @@ def _audit_files(files: Sequence[DicomMetadata], subject: CapturedSubject) -> Au
         ]
         duplicate_of.update(find_duplicate_pairs(candidates, digests))
 
-    misfiled = find_misfiled_files(metadata_by_folder)
+    series_folder = _series_folders(metadata_by_folder)
+    metadata_by_group: dict[str, list[DicomMetadata]] = defaultdict(list)
+    for metadata in files:
+        group = series_folder.get(metadata.path, metadata.path.parent)
+        metadata_by_group[str(group)].append(metadata)
+    misfiled = find_misfiled_files(metadata_by_group)
 
     audited_files = [
         AuditedFile(
@@ -133,6 +201,7 @@ def _audit_files(files: Sequence[DicomMetadata], subject: CapturedSubject) -> Au
             is_misfiled=path in misfiled,
             is_sop_conflict=path in sop_conflicts,
             duplicate_of=duplicate_of.get(path),
+            series_folder=series_folder.get(path),
         )
         for path, metadata in sorted(metadata_by_path.items())
     ]
@@ -366,7 +435,7 @@ def folder_notes(audit_result: AuditResult) -> list[FolderNote]:
     """Notes for every folder that has any, imaging series first, PR/SR folders last."""
     files_by_folder: dict[Path, list[AuditedFile]] = defaultdict(list)
     for file in audit_result.files:
-        files_by_folder[file.metadata.path.parent].append(file)
+        files_by_folder[file.folder].append(file)
     result = []
     for folder, files in sorted(
         files_by_folder.items(), key=lambda item: (natural_sort_key(item[0].name), item[0])
