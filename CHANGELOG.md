@@ -1,13 +1,32 @@
 # Changelog
 
-## Unreleased
+## v2.8.0
+
+**Privacy fix: re-run any data sanitised with v2.7.4 or earlier before you share it.** With `standard`,
+`minimal` and `full`, original UIDs survived in `ReferencedSOPInstanceUID`, `DimensionOrganizationUID` and
+other UID attributes (Siemens UIDs embed the scan date and time), and those references no longer pointed
+at any file in the archive. Only the study, series, SOP instance and frame-of-reference UIDs were reissued.
+A policy that reissues UIDs now remaps every instance UID by value, so a file's SOP Instance UID and the
+references to it stay in step. Class, transfer-syntax and coding-scheme UIDs and registry UIDs
+(`1.2.840.10008.*`) are kept, as is any field the policy names itself. `retain` is unchanged. Private
+(vendor) elements are still kept by every shipped policy, and some hold identifiers; check them before
+sharing.
 
 - Fix: an export with every DICOM in one folder (no `.dcm` extension needed) had every file reported
   as "misfiled", so a real run sent nearly all of it to review. The misfiled check assumed one series
   per folder. A folder that holds several series is now audited series by series, by the headers, so
   a sorted export and a single-folder export give the same result.
 - `--qc` now audits and prints each subject separately, as a normal run does, instead of one merged
-  table. SOP-UID conflicts are therefore checked within a subject in `--qc` too.
+  table. SOP-UID conflicts are therefore checked within a subject in `--qc` too. A subject with no
+  PatientID is labelled `(no PatientID)`.
+- A file named `<SOPInstanceUID>.dcm` counts as named after its own UID when deciding whether a folder
+  holds a whole study. Under a policy that hides series descriptions, the `series-NNN` labels in the
+  reports are numbered by series number, so their order no longer follows the hidden descriptions.
+- Faster. Sanitising walks each file's datasets once instead of once per policy field (an Enhanced MR
+  file with the `minimal` policy: 54 ms to 13 ms), and exports of 200 files or more have their headers
+  read by several processes (`--qc` on 8294 files: 28 s to 3 s). A four-subject sanitised run went from
+  10 min 10 s to 4 min 43 s. Output is unchanged. If you call `iter_dicom_metadata` from your own
+  script, put the call under `if __name__ == "__main__":`.
 
 ## v2.7.4
 

@@ -202,7 +202,9 @@ One command runs the full pipeline, in order:
    and are then always archived with a checksum into `archives/` as their own
    `review-archive`, independent of `--keep-working-files`.
 6. **sanitise** *(optional, `--sanitise`)*: replaces patient identity
-   according to a chosen policy; see [Sanitisation](#sanitisation) below. When
+   according to a chosen policy and, for every policy that reissues UIDs, remaps every
+   remaining instance UID by value, so an image's SOP Instance UID and the references
+   that point at it stay in step; see [Sanitisation](#sanitisation) below. When
    used, the `review-archive` is de-identified with the same policy and the
    same replacement identifiers as the main archive, so a sanitised run never
    leaks real PHI through its review files either.
@@ -454,7 +456,7 @@ Five policies ship in `src/dichotomise/pydcm/policies/`:
 | Policy | What happens |
 |---|---|
 | `retain` | Nothing changed. |
-| `standard` | Identity, patient address, accession number, institution, and device-operator fields removed; every UID reissued; birth date scrambled by ±1 year (day/month randomised too); demographic fields (e.g. sex) and all scan-descriptive text (protocol name, series/study description, etc.) kept. |
+| `standard` | Identity, patient address, accession number, institution, and device-operator fields removed; every instance UID reissued (study, series, SOP instance, frame of reference, referenced instances, dimension organisation), consistently across files; birth date scrambled by ±1 year (day/month randomised too); demographic fields (e.g. sex) and all scan-descriptive text (protocol name, series/study description, etc.) kept. |
 | `full` | Everything `standard` does, plus scan-descriptive text and the device serial number also removed. |
 | `minimal` *(the default level)* | Everything `standard` does, but a generated pseudonym is used for both patient name (`Abrahall^Gracious`) and patient ID/output name (`abrahall_gracious`); the birth date is the scan date rather than scrambled. |
 | `custom` | A worked, commented example for building your own. It is not used automatically. |
@@ -464,6 +466,12 @@ built from, the policy file schema, and how to write your own, is in
 [`docs/sanitise-policies.md`](docs/sanitise-policies.md). In short: copy
 `custom.json` to `<your-policy-name>.json` in the same folder, edit it, and
 run with `--sanitise-policy <your-policy-name>`.
+
+A policy that reissues UIDs remaps every UID value except class, transfer-syntax and
+coding-scheme UIDs and the standard's registry UIDs (`1.2.840.10008.*`), which are shared
+by every site and stay as they are. A field the policy names itself follows its own action.
+The shipped policies keep private (vendor) elements, and some of those hold identifiers,
+UIDs included. Check them before you share sanitised data.
 
 ## Layout
 
@@ -492,6 +500,10 @@ uv run mypy src
 `tests/data/` (real, non-synthetic scan exports used for some tests) is
 gitignored and never committed. It may contain identifying information.
 
+Exports of 200 files or more have their headers read by several processes. The `dichotomise`
+command handles this itself. If you call `dichotomise.pydcm.read.iter_dicom_metadata` from your
+own script, put the call under `if __name__ == "__main__":`.
+
 ## Citing dichotomise
 
 Each release is archived on Zenodo with a DOI
@@ -507,16 +519,16 @@ button from it on the repo's main page, or cite it directly:
 
 ```mermaid
 flowchart TD
-    SOURCE["Raw scanner export"] --> CAPTURE["capture<br/>Groups DICOM by subject, in place"]
+    SOURCE["Raw scanner export<br/>(one folder, or sorted into subfolders)"] --> CAPTURE["capture<br/>Groups DICOM by subject from the headers, in place"]
     CAPTURE --> ARCHIVE["source_archive<br/>Per-study verified tarball + checksum (archives/), straight from the source files"]
-    ARCHIVE --> AUDIT["audit<br/>Byte-for-byte duplicates, SOP-UID conflicts, misfiled files and metadata QA per subject"]
+    ARCHIVE --> AUDIT["audit<br/>Series found from the headers; byte-for-byte duplicates, SOP-UID conflicts, misfiled files and metadata QA per subject"]
     AUDIT --> REPORT1["stage-01-report.json<br/>stage-01-audit.csv<br/>source-manifest.csv"]
     AUDIT --> SIFT["sift<br/>Splits retained vs review, logically"]
     SIFT --> REPORT2["stage-02-report.json<br/>retained-manifest.csv<br/>review-manifest.csv"]
     SIFT -. "--sanitise only" .-> SOURCE_MAP["source-map.csv (archives/)<br/>Written now, completed at the end; maps folder-NN/NNNN report names to real source files"]
     SIFT --> RECTIFY["rectify<br/>Copies retained files into a metadata-sorted, renamed DICOM tree (an identical repeat is written once)"]
     SIFT --> REVIEW_RECTIFY["rectify_review<br/>Copies and renames review files the same way"]
-    RECTIFY --> SANITISE["sanitise (optional, --sanitise)<br/>Replaces patient identity per policy; reports use folder-NN/NNNN names"]
+    RECTIFY --> SANITISE["sanitise (optional, --sanitise)<br/>Replaces patient identity per policy and remaps every instance UID by value; reports use folder-NN/NNNN names"]
     REVIEW_RECTIFY --> SANITISE_REVIEW["sanitise_review (optional, --sanitise)<br/>Same policy, shared replacement identifiers"]
     RECTIFY --> FINALISE["finalise<br/>Re-verifies output, archives it (archives/)"]
     SANITISE --> FINALISE

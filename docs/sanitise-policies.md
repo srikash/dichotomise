@@ -16,9 +16,9 @@ consistent, graduated pattern:
 
 - **`service`** removes *who* the subject is and *who/where* scanned them —
   patient name, patient ID, birth date, institution name/address/department,
-  station name, operator, performing physician — and reissues every UID
-  (study/series/instance/frame-of-reference) so nothing traces back to the
-  source. It keeps every field describing *what* was scanned: protocol name,
+  station name, operator, performing physician, and reissues every instance UID
+  (study, series, SOP instance, frame of reference, referenced instances and
+  the like) so nothing traces back to the source. It keeps every field describing *what* was scanned: protocol name,
   series/study description, image comments, procedure IDs, device serial
   number.
 - **`reduced`** does everything `service` does, **plus** removes the
@@ -62,9 +62,12 @@ An action is one of:
 - `"replace"` — set to the fixed `value` given, or a placeholder such as
   `<subject-label>` (the run's replacement label) or `<scan-date>` (the
   study's own scan date, not a real birth date).
-- `"regenerate"` — replaced with a newly generated identifier, applied
+- `"regenerate"`: replaced with a newly generated identifier, applied
   consistently everywhere that identifier appears, including inside nested
-  reference sequences.
+  reference sequences. A policy that regenerates `SOPInstanceUID` also remaps
+  every other instance UID in the file by value, except class, transfer-syntax
+  and coding-scheme UIDs, registry UIDs (`1.2.840.10008.*`) and any field the
+  policy lists with a different action.
 - `"add"` — a field that isn't present by default gets added.
 - `"scramble_date"` — replaced with a random *but valid* date, shifted by
   exactly one year (chosen randomly as +1 or -1, never 0) from the real
@@ -123,7 +126,7 @@ invented names.
 | Policy | Matches | What happens |
 |---|---|---|
 | `default.json` | scanner's `default_export` | nothing changed |
-| `standard.json` | scanner's `service_export` | identity + institution/device-operator removed, UIDs reissued, birth date scrambled by ±1 year (day/month randomised too), demographic fields (e.g. sex) and descriptive text kept |
+| `standard.json` | scanner's `service_export` | identity + institution/device-operator removed, instance UIDs reissued, birth date scrambled by ±1 year (day/month randomised too), demographic fields (e.g. sex) and descriptive text kept |
 | `minimal.json` | (worked example, not a scanner export) | extends `standard`, but the replacement name is a random placeholder in `Surname^Firstname` form (e.g. `McLean^Gracious`) instead of the plain subject label, and the birth date is simply the scan date rather than scrambled — a lighter-weight alternative when a distinctive placeholder name matters more than keeping an approximate age |
 | `full.json` | scanner's `reduced_export` | everything `standard` does, plus descriptive text and device serial number removed |
 | `custom.json` | (worked example, not a scanner export) | a template for a non-expert to copy: extends `full` but keeps protocol/series descriptions, and additionally removes accession number and referring/requesting physician — fields none of the other four touch |
