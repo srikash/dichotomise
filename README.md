@@ -171,7 +171,9 @@ One command runs the full pipeline, in order:
    study, or series metadata within a series. Series come from the headers, not from the
    layout: a folder of one series is checked for strays, and a folder that holds several
    series (a whole study exported into one folder, with or without a `.dcm` extension) is
-   audited series by series. The CLI prints a Rich inventory table
+   audited series by series (three or more series, or two when most files are named after
+   their own SOP Instance UID; two series under other names still read as one series plus
+   strays). The CLI prints a Rich inventory table
    followed by a NOTES section that explains each finding in plain language
    (for example which file belongs to which series, and which files repeat
    which), and the reports include the same notes and a spreadsheet-friendly
@@ -202,7 +204,7 @@ One command runs the full pipeline, in order:
    and are then always archived with a checksum into `archives/` as their own
    `review-archive`, independent of `--keep-working-files`.
 6. **sanitise** *(optional, `--sanitise`)*: replaces patient identity
-   according to a chosen policy and, for every policy that reissues UIDs, remaps every
+   according to a chosen policy and, for every policy that regenerates `SOPInstanceUID`, remaps every
    remaining instance UID by value, so an image's SOP Instance UID and the references
    that point at it stay in step; see [Sanitisation](#sanitisation) below. When
    used, the `review-archive` is de-identified with the same policy and the
@@ -467,7 +469,7 @@ built from, the policy file schema, and how to write your own, is in
 `custom.json` to `<your-policy-name>.json` in the same folder, edit it, and
 run with `--sanitise-policy <your-policy-name>`.
 
-A policy that reissues UIDs remaps every UID value except class, transfer-syntax and
+A policy that regenerates `SOPInstanceUID` remaps every UID value except class, transfer-syntax and
 coding-scheme UIDs and the standard's registry UIDs (`1.2.840.10008.*`), which are shared
 by every site and stay as they are. A field the policy names itself follows its own action.
 The shipped policies keep private (vendor) elements, and some of those hold identifiers,
