@@ -172,12 +172,24 @@ def _read_or_none(path: Path) -> DicomMetadata | None:
         return None
 
 
+def _cpu_limit_from_cgroup(text: str) -> int | None:
+    """The CPU count a cgroup v2 `cpu.max` quota allows (rounded up), or None if unlimited."""
+    parts = text.split()
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit() or int(parts[1]) == 0:
+        return None
+    return max(1, -(-int(parts[0]) // int(parts[1])))
+
+
 def _worker_count() -> int:
     try:
         available = len(os.sched_getaffinity(0))
     except AttributeError:  # not available on every platform
         available = os.cpu_count() or 1
-    return max(1, min(available, _MAX_WORKERS))
+    try:  # a container started with --cpus limits CPU time, not the CPUs it can see
+        quota = _cpu_limit_from_cgroup(Path("/sys/fs/cgroup/cpu.max").read_text())
+    except OSError:
+        quota = None
+    return max(1, min(available, quota or available, _MAX_WORKERS))
 
 
 def _read_all(paths: list[Path]) -> list[DicomMetadata | None]:

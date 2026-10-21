@@ -131,3 +131,17 @@ def test_iter_dicom_metadata_gives_the_same_list_when_read_in_parallel(
 
     assert len(serial) == 6
     assert parallel == serial
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("max 100000\n", None),
+        ("100000 100000\n", 1),
+        ("250000 100000\n", 3),
+        ("", None),
+        ("x y", None),
+    ],
+)
+def test_cpu_limit_from_a_cgroup_quota(text: str, expected: int | None) -> None:
+    assert read_module._cpu_limit_from_cgroup(text) == expected
