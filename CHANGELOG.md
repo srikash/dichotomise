@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.9.1
+
+Less disk reading in a plain run. Output is unchanged.
+
+- Without `--sanitise`, each copy is no longer read back right after it is made, because finalise already compares every copy with its source digest before archiving. One full read of every retained and review file is saved (the rectify stage took 3.5 s instead of 6.4 s on 489 real files). With `--sanitise` and `--keep-working-files` the check stays, since sanitising reads those copies. `--sort` copies are still checked.
+- The Docker image now includes `pigz`, so archives are compressed on every core (a 3.3 GB sanitised run took about 3 minutes instead of 30), and the Docker example in the installation guide passes `-u` so output is not root-owned.
+- Reports and manifests are written as UTF-8.
+
 ## v2.9.0
 
 Integrity and provenance checks, speed-ups, and a new sort mode (`--sort`). Sanitised and archived output is unchanged for inputs that

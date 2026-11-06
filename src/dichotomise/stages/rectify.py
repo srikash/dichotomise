@@ -80,14 +80,21 @@ def plan_rectify(
     )
 
 
-def copy_planned(sources: dict[Path, Path], digests: dict[Path, str]) -> None:
-    """Copy each planned file and check the copy matches its source."""
+def copy_planned(
+    sources: dict[Path, Path], digests: dict[Path, str], *, check: bool = True
+) -> None:
+    """Copy each planned file and, with `check`, read the copy back to see it matches its source.
+
+    `check=False` is for a caller whose later stage compares the copy with the source digest
+    anyway (finalise does, unless sanitising), so the copy is not read twice.
+    """
     for target, source in sources.items():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        if file_digest(source, digests) != file_digest(target):
+        source_digest = file_digest(source, digests)
+        if check and source_digest != file_digest(target):
             raise FinaliseVerificationError(f"Copied file differs from its source: {target}")
-        digests[target] = digests[source]
+        digests[target] = source_digest
 
 
 def rectify(
@@ -95,6 +102,7 @@ def rectify(
     digests: dict[Path, str],
     *,
     describe_series: bool = True,
+    check_copies: bool = True,
 ) -> RectifyResult:
     """Copy every retained file into its rectified name and folder.
 
@@ -107,10 +115,11 @@ def rectify(
 
     `digests` holds source-file SHA-256 digests (the pipeline passes the ones taken while
     archiving the source, and every copy is added), so finalise can check the copies against
-    them; finalise reads them back from `target_by_source`.
+    them; finalise reads them back from `target_by_source`. `check_copies=False` skips the
+    read-back of each copy here when finalise will compare it with its source digest.
     """
     plan = plan_rectify(sift_result, digests, describe_series=describe_series)
-    copy_planned(plan.sources, digests)
+    copy_planned(plan.sources, digests, check=check_copies)
     return RectifyResult(
         plan.subject,
         plan.rectified_dir,
@@ -183,7 +192,11 @@ def plan_rectify_review(
 
 
 def rectify_review(
-    sift_result: SiftResult, digests: dict[Path, str], *, describe_series: bool = True
+    sift_result: SiftResult,
+    digests: dict[Path, str],
+    *,
+    describe_series: bool = True,
+    check_copies: bool = True,
 ) -> RectifyReviewResult:
     """Copy every review file into its rectified name, tolerating collisions.
 
@@ -195,10 +208,10 @@ def rectify_review(
     (`merged_identical_count` counts them). A name shared by files that
     differ keeps a disambiguated name (`-dup01`, `-dup02`, ...) instead of
     being silently dropped or overwritten. `digests` is the same source-digest cache that
-    `rectify()` takes.
+    `rectify()` takes, and so does `check_copies`.
     """
     plan = plan_rectify_review(sift_result, digests, describe_series=describe_series)
-    copy_planned(plan.sources, digests)
+    copy_planned(plan.sources, digests, check=check_copies)
     return RectifyReviewResult(
         plan.review_rectified_dir,
         plan.files,

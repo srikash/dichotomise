@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from helpers import make_subject
 
-from dichotomise.errors import DichotomiseError
+from dichotomise.errors import DichotomiseError, FinaliseVerificationError
 from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.stages.rectify import rectify, rectify_review
 from dichotomise.stages.sift import ReviewFile, SiftResult
@@ -191,3 +192,39 @@ def test_rectify_review_writes_a_byte_identical_repeat_only_once(tmp_path: Path)
     assert len(result.files) == 1
     assert result.collision_count == 0
     assert result.merged_identical_count == 1
+
+
+def _one_file_sift(tmp_path: Path) -> SiftResult:
+    source = tmp_path / "src" / "021-DWI" / "1.dcm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"first")
+    subject = make_subject(tmp_path / "working" / "sub-01", tmp_path / "src")
+    return SiftResult(subject=subject, retained=[_metadata(source, instance_number=1)], review=[])
+
+
+def _corrupting_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the copy step write bytes that differ from the source."""
+
+    def corrupt(source: Path, target: Path) -> None:
+        target.write_bytes(b"corrupt")
+
+    monkeypatch.setattr("dichotomise.stages.rectify.shutil.copy2", corrupt)
+
+
+def test_rectify_checks_each_copy_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _corrupting_copy(monkeypatch)
+    with pytest.raises(FinaliseVerificationError, match="Copied file differs"):
+        rectify(_one_file_sift(tmp_path), {})
+
+
+def test_rectify_can_leave_the_copy_check_to_finalise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _corrupting_copy(monkeypatch)
+    digests: dict[Path, str] = {}
+    result = rectify(_one_file_sift(tmp_path), digests, check_copies=False)
+    (copy,) = result.target_by_source.values()
+    # The copy's digest is recorded as the source's, so finalise's later read catches the mismatch.
+    assert digests[copy] != hashlib.sha256(copy.read_bytes()).hexdigest()

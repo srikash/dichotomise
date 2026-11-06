@@ -251,12 +251,18 @@ def _process_subject(
 
     check_sources(source_fingerprints)
     direct = sanitise_requested and not keep_working_files
+    # Without --sanitise, finalise compares every copy with its source digest, so copying need not.
     rectify_result = _run_stage(
         f"{subject_prefix}: rectifying retained files",
         lambda: (
             plan_rectify(sift_result, source_digests, describe_series=describe_series)
             if direct
-            else rectify(sift_result, source_digests, describe_series=describe_series)
+            else rectify(
+                sift_result,
+                source_digests,
+                describe_series=describe_series,
+                check_copies=sanitise_requested,
+            )
         ),
         on_stage,
     )
@@ -265,7 +271,12 @@ def _process_subject(
         lambda: (
             plan_rectify_review(sift_result, source_digests, describe_series=describe_series)
             if direct
-            else rectify_review(sift_result, source_digests, describe_series=describe_series)
+            else rectify_review(
+                sift_result,
+                source_digests,
+                describe_series=describe_series,
+                check_copies=sanitise_requested,
+            )
         ),
         on_stage,
     )
