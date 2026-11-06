@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.9.2
+
+Less disk reading when archiving. Archives and their contents are unchanged.
+
+- An archive's SHA-256 is now taken from the compressed bytes as they are written, instead of reading the finished archive back to hash it. That saves one full read of every archive (about 1.7 GB each on 489 real files), which matters most on slow or network storage; on a local disk the read was mostly served from memory, so the run time is about the same. A write error while compressing is reported as an archive error. `verify_archive` still checks an archive against its checksum later.
+
 ## v2.9.1
 
 Less disk reading in a plain run. Output is unchanged.

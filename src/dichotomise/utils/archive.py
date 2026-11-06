@@ -1,11 +1,16 @@
-"""make_tarball() and verify_archive(): tar.gz creation with a sha256 sidecar."""
+"""make_tarball() and verify_archive(): tar.gz creation with a sha256 sidecar.
+
+The checksum is taken from the compressed bytes as they are written, so an archive is never
+read back just to be hashed."""
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import shutil
 import subprocess
 import tarfile
+import threading
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -30,6 +35,23 @@ class _HashingReader:
         data = self.source.read(size)
         self.hasher.update(data)
         return data
+
+
+class _HashingWriter:
+    """Wrap a file so everything written to it is also hashed (the archive's checksum)."""
+
+    def __init__(self, target: BinaryIO) -> None:
+        self.target = target
+        self.hasher = hashlib.sha256()
+
+    def write(self, data: bytes) -> int:
+        """Write to the wrapped file and add the bytes to the running hash."""
+        self.hasher.update(data)
+        return self.target.write(data)
+
+    def flush(self) -> None:
+        """Flush the wrapped file."""
+        self.target.flush()
 
 
 # gzip's own default, kept the same whichever compressor ends up writing.
@@ -61,15 +83,15 @@ def _checksum_path_for(archive_path: Path) -> Path:
     return archive_path.with_name(f"{name}.sha256")
 
 
-def _finish_archive(archive_path: Path) -> Archive:
-    """Write the checksum sidecar for a finished archive.
+def _finish_archive(archive_path: Path, digest: str) -> Archive:
+    """Write the checksum sidecar for a finished archive, from the digest taken as it was written.
 
-    No re-check follows: hashing the file again straight after only proves it did not change
-    between two reads, and costs a full extra read of every archive. `verify_archive` checks
-    an archive later, against its sidecar.
+    No re-read follows: it would cost a full extra read of every archive, and straight after
+    writing it is served from memory, so it would prove nothing about the disk.
+    `verify_archive` checks an archive later, against its sidecar.
     """
     checksum_path = _checksum_path_for(archive_path)
-    checksum_path.write_text(fs.file_digest(archive_path) + "\n")
+    checksum_path.write_text(digest + "\n")
     return Archive(path=archive_path, checksum_path=checksum_path)
 
 
@@ -138,6 +160,20 @@ def _add_entries(
                 on_progress(written_bytes, total_bytes)
 
 
+def _drain_to_file(stream: BinaryIO, out_file: _HashingWriter, failures: list[OSError]) -> None:
+    """Copy `stream` into the hashing writer until it ends; after a write error, keep reading.
+
+    Reading on (and discarding) stops `pigz` blocking on a full pipe, so the main thread can
+    finish and report the first error.
+    """
+    while chunk := stream.read(1024 * 1024):
+        if not failures:
+            try:
+                out_file.write(chunk)
+            except OSError as error:
+                failures.append(error)
+
+
 def _write_tarball_with_pigz(
     pigz: str,
     entries: Sequence[tuple[Path, Path]],
@@ -145,20 +181,24 @@ def _write_tarball_with_pigz(
     total_bytes: int,
     on_progress: ProgressCallback | None,
     source_digests: dict[Path, str] | None = None,
-) -> None:
+) -> str:
     """Pipe an uncompressed tar stream through `pigz` (parallel gzip) to `archive_path`.
 
     `tarfile` writes the uncompressed tar stream straight into the `pigz`
     subprocess's stdin (mode "w|": no seeking, suitable for a pipe); `pigz`
-    does the gzip compression itself, in parallel across CPU cores, with
-    its stdout redirected straight to the archive file.
+    does the gzip compression itself, in parallel across CPU cores. A second thread
+    copies its output into the archive file and hashes it. Returns the archive's SHA-256.
     """
-    with archive_path.open("wb") as out_file:
+    with archive_path.open("wb") as raw_file:
+        out_file = _HashingWriter(raw_file)
         process = subprocess.Popen(
-            [pigz, "-c", f"-{_GZIP_COMPRESSLEVEL}"], stdin=subprocess.PIPE, stdout=out_file
+            [pigz, "-c", f"-{_GZIP_COMPRESSLEVEL}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
-        stdin = process.stdin
-        assert stdin is not None  # guaranteed by stdin=subprocess.PIPE above
+        stdin, stdout = process.stdin, process.stdout
+        assert stdin is not None and stdout is not None  # guaranteed by the pipes above
+        failures: list[OSError] = []
+        drain = threading.Thread(target=_drain_to_file, args=(stdout, out_file, failures))
+        drain.start()
         try:
             with tarfile.open(fileobj=stdin, mode="w|") as tar:
                 _add_entries(tar, entries, total_bytes, on_progress, source_digests)
@@ -171,14 +211,23 @@ def _write_tarball_with_pigz(
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+            drain.join()
+            stdout.close()
             raise
         else:
             stdin.close()
+            drain.join()
+            stdout.close()
             return_code = process.wait()
+        if failures:
+            raise ArchiveCreationError(
+                f"Could not write {archive_path}: {failures[0]}"
+            ) from failures[0]
         if return_code != 0:
             raise ArchiveCreationError(
                 f"pigz exited with status {return_code} while writing {archive_path}"
             )
+    return out_file.hasher.hexdigest()
 
 
 def write_tarball(
@@ -200,14 +249,18 @@ def write_tarball(
 
     pigz = pigz_path()
     if pigz is not None:
-        _write_tarball_with_pigz(
+        digest = _write_tarball_with_pigz(
             pigz, sorted_entries, archive_path, total_bytes, on_progress, source_digests
         )
     else:
-        with tarfile.open(archive_path, "w:gz", compresslevel=_GZIP_COMPRESSLEVEL) as tar:
-            _add_entries(tar, sorted_entries, total_bytes, on_progress, source_digests)
+        with archive_path.open("wb") as raw_file:
+            out_file = _HashingWriter(raw_file)
+            gz = gzip.GzipFile(archive_path.name, "wb", _GZIP_COMPRESSLEVEL, out_file)
+            with gz, tarfile.open(fileobj=gz, mode="w") as tar:
+                _add_entries(tar, sorted_entries, total_bytes, on_progress, source_digests)
+        digest = out_file.hasher.hexdigest()
 
-    return _finish_archive(archive_path)
+    return _finish_archive(archive_path, digest)
 
 
 def verify_archive(archive_path: Path, checksum_path: Path) -> bool:

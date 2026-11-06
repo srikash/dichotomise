@@ -156,3 +156,44 @@ def test_make_tarball_raises_when_pigz_exits_with_an_error(
 
     with pytest.raises(ArchiveCreationError, match="status 7"):
         make_tarball(source, tmp_path / "study_archive.tar.gz")
+
+
+@pytest.fixture(params=["stdlib", "pigz"])
+def codec(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Run a test once with the stdlib codec and once with a stand-in `pigz` (plain `gzip -c`)."""
+    if request.param == "stdlib":
+        monkeypatch.setattr(archive_module, "pigz_path", lambda: None)
+    else:
+        fake = tmp_path / "gzip-as-pigz"
+        fake.write_text("#!/bin/sh\nexec gzip -c -9\n")
+        fake.chmod(0o755)
+        monkeypatch.setattr(archive_module, "pigz_path", lambda: str(fake))
+    return str(request.param)
+
+
+def test_checksum_is_taken_while_writing_and_the_archive_is_not_read_back(
+    codec: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> str:
+        raise AssertionError("the archive was read back to be hashed")
+
+    monkeypatch.setattr(archive_module.fs, "file_digest", forbidden)
+
+    archive = make_tarball(_make_source(tmp_path), tmp_path / "study_archive.tar.gz")
+
+    recorded = archive.checksum_path.read_text().split()[0]
+    assert recorded == hashlib.sha256(archive.path.read_bytes()).hexdigest()
+    with tarfile.open(archive.path, "r:gz") as tar:
+        assert "series-a/1.dcm" in tar.getnames()
+
+
+def test_a_write_error_while_compressing_is_reported(
+    codec: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def disk_full(self: object, data: bytes) -> int:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(archive_module._HashingWriter, "write", disk_full)
+
+    with pytest.raises((ArchiveCreationError, OSError), match="No space left"):
+        make_tarball(_make_source(tmp_path), tmp_path / "study_archive.tar.gz")
