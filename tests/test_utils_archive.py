@@ -253,3 +253,26 @@ def test_a_source_that_vanishes_mid_archive_is_not_reported_as_a_write_error(
     with pytest.raises(OSError) as raised:
         make_tarball(source, tmp_path / "study_archive.tar.gz", on_progress=remove_second)
     assert "Could not write" not in str(raised.value)
+
+
+def test_a_full_disk_stops_the_archive_early(
+    codec: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run stops at the failed write, not after every file is compressed."""
+    source = _big_source(tmp_path)
+    for name in ("3.dcm", "4.dcm", "5.dcm"):
+        (source / "series-a" / name).write_bytes(os.urandom(2_000_000))
+    added: list[int] = []
+
+    def full_disk(self: archive_module._HashingWriter, data: bytes) -> int:
+        raise ArchiveCreationError("Could not write: No space left on device")
+
+    monkeypatch.setattr(archive_module._HashingWriter, "write", full_disk)
+
+    with pytest.raises(ArchiveCreationError, match="No space left"):
+        make_tarball(
+            source,
+            tmp_path / "study_archive.tar.gz",
+            on_progress=lambda done, total: added.append(done),
+        )
+    assert len(added) < 5

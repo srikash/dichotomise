@@ -172,21 +172,24 @@ def _add_entries(
 
 
 def _drain_to_file(
-    stream: BinaryIO, out_file: _HashingWriter, failures: list[ArchiveCreationError]
+    stream: BinaryIO,
+    out_file: _HashingWriter,
+    failures: list[ArchiveCreationError],
+    process: subprocess.Popen[bytes],
 ) -> None:
-    """Copy `stream` into the hashing writer until it ends; after a write error, keep reading.
+    """Copy `stream` into the hashing writer until it ends; on a write error, stop `pigz`.
 
-    Reading on (and discarding) stops `pigz` blocking on a full pipe, so the main thread can
-    finish and report the first error.
+    Stopping `pigz` breaks the pipe the main thread is feeding, so the run ends at once instead
+    of after the whole subject is compressed. The rest of the output is read and dropped so that
+    nothing blocks; the main thread reports the first error.
     """
-    # shortcut: after a write error it still reads (and drops) all of pigz's output, so a full
-    # disk is reported only once the subject is compressed; upgrade: close the pipe, map BrokenPipe.
     while chunk := stream.read(1024 * 1024):
         if not failures:
             try:
                 out_file.write(chunk)
             except ArchiveCreationError as error:
                 failures.append(error)
+                process.terminate()
 
 
 def _write_tarball_with_pigz(
@@ -212,12 +215,12 @@ def _write_tarball_with_pigz(
         stdin, stdout = process.stdin, process.stdout
         assert stdin is not None and stdout is not None  # guaranteed by the pipes above
         failures: list[ArchiveCreationError] = []
-        drain = threading.Thread(target=_drain_to_file, args=(stdout, out_file, failures))
+        drain = threading.Thread(target=_drain_to_file, args=(stdout, out_file, failures, process))
         drain.start()
         try:
             with tarfile.open(fileobj=stdin, mode="w|") as tar:
                 _add_entries(tar, entries, total_bytes, on_progress, source_digests)
-        except BaseException:  # includes Ctrl-C: never leave pigz running after an interrupt
+        except BaseException as error:  # includes Ctrl-C: never leave pigz running after one
             process.terminate()
             with suppress(OSError):
                 stdin.close()
@@ -228,6 +231,8 @@ def _write_tarball_with_pigz(
                 process.wait()
             drain.join()
             stdout.close()
+            if failures and isinstance(error, OSError):  # the pipe broke because pigz was stopped
+                raise failures[0] from error
             raise
         else:
             stdin.close()
