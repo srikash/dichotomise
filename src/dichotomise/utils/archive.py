@@ -166,6 +166,8 @@ def _drain_to_file(stream: BinaryIO, out_file: _HashingWriter, failures: list[OS
     Reading on (and discarding) stops `pigz` blocking on a full pipe, so the main thread can
     finish and report the first error.
     """
+    # shortcut: after a write error it still reads (and drops) all of pigz's output, so a full
+    # disk is reported only once the subject is compressed; upgrade: close the pipe, map BrokenPipe.
     while chunk := stream.read(1024 * 1024):
         if not failures:
             try:
@@ -253,11 +255,14 @@ def write_tarball(
             pigz, sorted_entries, archive_path, total_bytes, on_progress, source_digests
         )
     else:
-        with archive_path.open("wb") as raw_file:
-            out_file = _HashingWriter(raw_file)
-            gz = gzip.GzipFile(archive_path.name, "wb", _GZIP_COMPRESSLEVEL, out_file)
-            with gz, tarfile.open(fileobj=gz, mode="w") as tar:
-                _add_entries(tar, sorted_entries, total_bytes, on_progress, source_digests)
+        try:
+            with archive_path.open("wb") as raw_file:
+                out_file = _HashingWriter(raw_file)
+                gz = gzip.GzipFile(archive_path.name, "wb", _GZIP_COMPRESSLEVEL, out_file)
+                with gz, tarfile.open(fileobj=gz, mode="w") as tar:
+                    _add_entries(tar, sorted_entries, total_bytes, on_progress, source_digests)
+        except OSError as error:  # the same error type the pigz path reports
+            raise ArchiveCreationError(f"Could not write {archive_path}: {error}") from error
         digest = out_file.hasher.hexdigest()
 
     return _finish_archive(archive_path, digest)

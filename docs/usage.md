@@ -34,7 +34,7 @@ folder names do not need to be sensible.
 | `--random-name` | Generate a random replacement name using the `minimal` sanitisation policy. |
 | `--mapping` | One or more `PatientID:replacement_id` pairs. Repeat the flag or separate pairs with commas. The PatientID must exactly match the DICOM `PatientID`. |
 | `--mapping-file` | JSON object mapping DICOM PatientID to replacement ID, for example `{"source-01": "sub-0001"}`. A full path may be given with or without the `.json` suffix. |
-| `--keep-working-files` | Keep the processed DICOM files written during rectify/sanitise (`working/`) instead of deleting them once the archives are verified. |
+| `--keep-working-files` | Keep the processed DICOM files written during rectify/sanitise (`working/`) instead of deleting them once they are archived. |
 | `--keep-unzipped` | Also keep each study's final (optionally sanitised) files unarchived, in `final/`, independent of `--keep-working-files`, for a later BIDS conversion or other tooling that wants plain files rather than a tarball. |
 
 For one study, use `--subj-id`, `--random-name`, or `--new-id`. For several
@@ -170,7 +170,7 @@ the archive's folder names (they become just the series number) and out of the r
 The audit table and CSV flag differences in Patient ID/name, study UID/date/
 time, and series UID/number/description/protocol within a DICOM folder.
 
-Compression is always `.tar.gz`; `pigz` is used when it is on `PATH`.
+Compression is always `.tar.gz`; `pigz` is used when it is on `PATH` (the Docker image includes it).
 
 Several CPUs are used automatically, with no flag and respecting a container's CPU limit: reading headers
 once the export has 200 or more files, and sanitising and re-checking the finished output once a subject

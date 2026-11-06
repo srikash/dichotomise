@@ -195,5 +195,5 @@ def test_a_write_error_while_compressing_is_reported(
 
     monkeypatch.setattr(archive_module._HashingWriter, "write", disk_full)
 
-    with pytest.raises((ArchiveCreationError, OSError), match="No space left"):
+    with pytest.raises(ArchiveCreationError, match="No space left"):
         make_tarball(_make_source(tmp_path), tmp_path / "study_archive.tar.gz")
