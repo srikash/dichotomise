@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import tarfile
 from pathlib import Path
@@ -187,13 +188,68 @@ def test_checksum_is_taken_while_writing_and_the_archive_is_not_read_back(
         assert "series-a/1.dcm" in tar.getnames()
 
 
-def test_a_write_error_while_compressing_is_reported(
+def _big_source(tmp_path: Path) -> Path:
+    """Two files of incompressible bytes, so the compressed stream is written in several pieces."""
+    source = tmp_path / "source"
+    (source / "series-a").mkdir(parents=True)
+    for name in ("1.dcm", "2.dcm"):
+        (source / "series-a" / name).write_bytes(os.urandom(2_000_000))
+    return source
+
+
+def test_a_write_error_part_way_through_the_archive_is_reported(
     codec: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def disk_full(self: object, data: bytes) -> int:
-        raise OSError(28, "No space left on device")
+    real_init = archive_module._HashingWriter.__init__
 
-    monkeypatch.setattr(archive_module._HashingWriter, "write", disk_full)
+    class DiskFillsUp:
+        """Takes the first write, then reports a full disk, so the failure is mid-stream."""
+
+        def __init__(self, target: object) -> None:
+            self.target = target
+            self.writes = 0
+
+        def write(self, data: bytes) -> int:
+            self.writes += 1
+            if self.writes > 1:
+                raise OSError(28, "No space left on device")
+            return self.target.write(data)  # type: ignore[attr-defined, no-any-return]
+
+        def flush(self) -> None:
+            self.target.flush()  # type: ignore[attr-defined]
+
+    def init(self: archive_module._HashingWriter, target: object, archive_path: Path) -> None:
+        real_init(self, DiskFillsUp(target), archive_path)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(archive_module._HashingWriter, "__init__", init)
 
     with pytest.raises(ArchiveCreationError, match="No space left"):
-        make_tarball(_make_source(tmp_path), tmp_path / "study_archive.tar.gz")
+        make_tarball(_big_source(tmp_path), tmp_path / "study_archive.tar.gz")
+
+
+def test_the_writer_turns_os_errors_into_archive_errors(tmp_path: Path) -> None:
+    class FullDisk:
+        def write(self, data: bytes) -> int:
+            raise OSError(28, "No space left on device")
+
+        def flush(self) -> None:
+            raise OSError(28, "No space left on device")
+
+    writer = archive_module._HashingWriter(FullDisk(), tmp_path / "a.tar.gz")  # type: ignore[arg-type]
+    with pytest.raises(ArchiveCreationError, match="No space left"):
+        writer.write(b"data")
+    with pytest.raises(ArchiveCreationError, match="No space left"):
+        writer.flush()
+
+
+def test_a_source_that_vanishes_mid_archive_is_not_reported_as_a_write_error(
+    codec: str, tmp_path: Path
+) -> None:
+    source = _big_source(tmp_path)
+
+    def remove_second(done: int, total: int) -> None:
+        (source / "series-a" / "2.dcm").unlink(missing_ok=True)
+
+    with pytest.raises(OSError) as raised:
+        make_tarball(source, tmp_path / "study_archive.tar.gz", on_progress=remove_second)
+    assert "Could not write" not in str(raised.value)

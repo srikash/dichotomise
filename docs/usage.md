@@ -170,7 +170,7 @@ the archive's folder names (they become just the series number) and out of the r
 The audit table and CSV flag differences in Patient ID/name, study UID/date/
 time, and series UID/number/description/protocol within a DICOM folder.
 
-Compression is always `.tar.gz`; `pigz` is used when it is on `PATH` (the Docker image includes it).
+Compression is always `.tar.gz`; `pigz` is used when it is on `PATH` (the Docker image includes it). Without it (on Windows, or macOS without `pigz` installed) Python's own single-threaded compressor writes the same kind of archive and checksum, only more slowly. The checksum is taken while the archive is written. A failure writing the archive, such as a full disk, stops the run with an archive error whichever compressor is used.
 
 Several CPUs are used automatically, with no flag and respecting a container's CPU limit: reading headers
 once the export has 200 or more files, and sanitising and re-checking the finished output once a subject

@@ -38,20 +38,31 @@ class _HashingReader:
 
 
 class _HashingWriter:
-    """Wrap a file so everything written to it is also hashed (the archive's checksum)."""
+    """Wrap the archive file so everything written to it is also hashed (the archive's checksum).
 
-    def __init__(self, target: BinaryIO) -> None:
+    A failure to write the archive (a full disk, say) becomes an `ArchiveCreationError` here, at
+    the one place archive bytes are written, so it is not mistaken for a source-file error.
+    """
+
+    def __init__(self, target: BinaryIO, archive_path: Path) -> None:
         self.target = target
+        self.archive_path = archive_path
         self.hasher = hashlib.sha256()
 
     def write(self, data: bytes) -> int:
         """Write to the wrapped file and add the bytes to the running hash."""
         self.hasher.update(data)
-        return self.target.write(data)
+        try:
+            return self.target.write(data)
+        except OSError as error:
+            raise ArchiveCreationError(f"Could not write {self.archive_path}: {error}") from error
 
     def flush(self) -> None:
-        """Flush the wrapped file."""
-        self.target.flush()
+        """Flush the wrapped file; a full disk can surface only here."""
+        try:
+            self.target.flush()
+        except OSError as error:
+            raise ArchiveCreationError(f"Could not write {self.archive_path}: {error}") from error
 
 
 # gzip's own default, kept the same whichever compressor ends up writing.
@@ -160,7 +171,9 @@ def _add_entries(
                 on_progress(written_bytes, total_bytes)
 
 
-def _drain_to_file(stream: BinaryIO, out_file: _HashingWriter, failures: list[OSError]) -> None:
+def _drain_to_file(
+    stream: BinaryIO, out_file: _HashingWriter, failures: list[ArchiveCreationError]
+) -> None:
     """Copy `stream` into the hashing writer until it ends; after a write error, keep reading.
 
     Reading on (and discarding) stops `pigz` blocking on a full pipe, so the main thread can
@@ -172,7 +185,7 @@ def _drain_to_file(stream: BinaryIO, out_file: _HashingWriter, failures: list[OS
         if not failures:
             try:
                 out_file.write(chunk)
-            except OSError as error:
+            except ArchiveCreationError as error:
                 failures.append(error)
 
 
@@ -192,13 +205,13 @@ def _write_tarball_with_pigz(
     copies its output into the archive file and hashes it. Returns the archive's SHA-256.
     """
     with archive_path.open("wb") as raw_file:
-        out_file = _HashingWriter(raw_file)
+        out_file = _HashingWriter(raw_file, archive_path)
         process = subprocess.Popen(
             [pigz, "-c", f"-{_GZIP_COMPRESSLEVEL}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
         stdin, stdout = process.stdin, process.stdout
         assert stdin is not None and stdout is not None  # guaranteed by the pipes above
-        failures: list[OSError] = []
+        failures: list[ArchiveCreationError] = []
         drain = threading.Thread(target=_drain_to_file, args=(stdout, out_file, failures))
         drain.start()
         try:
@@ -222,13 +235,12 @@ def _write_tarball_with_pigz(
             stdout.close()
             return_code = process.wait()
         if failures:
-            raise ArchiveCreationError(
-                f"Could not write {archive_path}: {failures[0]}"
-            ) from failures[0]
+            raise failures[0]
         if return_code != 0:
             raise ArchiveCreationError(
                 f"pigz exited with status {return_code} while writing {archive_path}"
             )
+        out_file.flush()
     return out_file.hasher.hexdigest()
 
 
@@ -255,14 +267,12 @@ def write_tarball(
             pigz, sorted_entries, archive_path, total_bytes, on_progress, source_digests
         )
     else:
-        try:
-            with archive_path.open("wb") as raw_file:
-                out_file = _HashingWriter(raw_file)
-                gz = gzip.GzipFile(archive_path.name, "wb", _GZIP_COMPRESSLEVEL, out_file)
-                with gz, tarfile.open(fileobj=gz, mode="w") as tar:
-                    _add_entries(tar, sorted_entries, total_bytes, on_progress, source_digests)
-        except OSError as error:  # the same error type the pigz path reports
-            raise ArchiveCreationError(f"Could not write {archive_path}: {error}") from error
+        with archive_path.open("wb") as raw_file:
+            out_file = _HashingWriter(raw_file, archive_path)
+            gz = gzip.GzipFile(archive_path.name, "wb", _GZIP_COMPRESSLEVEL, out_file)
+            with gz, tarfile.open(fileobj=gz, mode="w") as tar:
+                _add_entries(tar, sorted_entries, total_bytes, on_progress, source_digests)
+            out_file.flush()
         digest = out_file.hasher.hexdigest()
 
     return _finish_archive(archive_path, digest)

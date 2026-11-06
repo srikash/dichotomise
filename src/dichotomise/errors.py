@@ -44,7 +44,7 @@ class NamingCollisionError(DichotomiseError):
 
 
 class ArchiveCreationError(DichotomiseError):
-    """Raised when the external `pigz` process fails while an archive is being written."""
+    """Raised when an archive cannot be written: `pigz` fails, or the archive file is unwritable."""
 
 
 class FinaliseVerificationError(DichotomiseError):
