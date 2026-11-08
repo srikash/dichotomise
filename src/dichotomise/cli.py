@@ -76,6 +76,7 @@ rich_click_config.OPTION_GROUPS = {
                 "--mapping-file",
                 "--keep-working-files",
                 "--keep-unzipped",
+                "--version",
                 "--help",
             ],
             "title_style": "bold",
@@ -107,6 +108,11 @@ class ProcessingOptions:
 
 class DichotomiseCommand(RichCommand):
     """Render the command's usage notes in the same Rich style as its options."""
+
+    def format_help(self, context: Any, formatter: Any) -> None:
+        """Lead the help with the version line, ahead of `Usage:`."""
+        formatter.write(Text.from_markup(f"[bold cyan]dichotomise v{_package_version()}[/]"))
+        super().format_help(context, formatter)
 
     def format_epilog(self, context: Any, formatter: Any) -> None:
         """Print the single- and multi-subject example panels under the help text."""
@@ -619,6 +625,13 @@ def _prepare_processing_options(
     ),
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
+)
+@click.version_option(
+    _package_version(),
+    "-v",
+    "--version",
+    prog_name="dichotomise",
+    message="%(prog)s v%(version)s",
 )
 @click.option(
     "--source-dir",

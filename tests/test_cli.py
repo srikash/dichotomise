@@ -13,7 +13,7 @@ from click import unstyle
 from click.testing import CliRunner
 
 import dichotomise.cli as cli_module
-from dichotomise.cli import cli
+from dichotomise.cli import _package_version, cli
 
 
 def test_interactive_interrupt_stops_work(tmp_path: Path) -> None:
@@ -620,3 +620,14 @@ def test_cli_inline_mappings_ignore_spaces_around_the_pairs() -> None:
     from dichotomise.cli import _parse_inline_mappings
 
     assert _parse_inline_mappings(("a:sub-1, b : sub-2",)) == {"a": "sub-1", "b": "sub-2"}
+
+
+def test_cli_version_flag_and_help_header() -> None:
+    version_line = f"dichotomise v{_package_version()}"
+
+    short = CliRunner().invoke(cli, ["-v"])
+    assert short.exit_code == 0, short.output
+    assert short.output.strip() == version_line
+
+    help_result = CliRunner().invoke(cli, ["--help"])
+    assert help_result.output.lstrip().startswith(version_line)

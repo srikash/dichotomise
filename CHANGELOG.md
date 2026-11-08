@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.9.3
+
+Version flag. Output is unchanged.
+
+- `-v` / `--version` prints the version. `-h` / `--help` now opens with the version line, ahead of `Usage:`.
+
 ## v2.9.2
 
 Less disk reading when archiving. Archives and their contents are unchanged.
