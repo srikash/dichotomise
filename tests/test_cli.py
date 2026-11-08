@@ -630,4 +630,4 @@ def test_cli_version_flag_and_help_header() -> None:
     assert short.output.strip() == version_line
 
     help_result = CliRunner().invoke(cli, ["--help"])
-    assert help_result.output.lstrip().startswith(version_line)
+    assert unstyle(help_result.output).lstrip().startswith(version_line)
