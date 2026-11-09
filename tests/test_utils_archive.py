@@ -13,6 +13,7 @@ import pytest
 import dichotomise.utils.archive as archive_module
 from dichotomise.errors import ArchiveCreationError
 from dichotomise.utils.archive import make_tarball, verify_archive
+from dichotomise.utils.jobs import set_jobs
 
 
 def _make_source(tmp_path: Path) -> Path:
@@ -276,3 +277,9 @@ def test_a_full_disk_stops_the_archive_early(
             on_progress=lambda done, total: added.append(done),
         )
     assert len(added) < 5
+
+
+def test_pigz_gets_the_jobs_count_only_when_one_was_given() -> None:
+    assert "-p" not in archive_module._pigz_command("pigz")
+    set_jobs(3)
+    assert archive_module._pigz_command("pigz")[-2:] == ["-p", "3"]

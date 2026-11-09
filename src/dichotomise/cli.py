@@ -39,6 +39,7 @@ from dichotomise.stages.audit import (
 from dichotomise.stages.sort import SortPlan, apply_sort, plan_sort
 from dichotomise.utils.archive import pigz_path
 from dichotomise.utils.console import console, error, success
+from dichotomise.utils.jobs import set_jobs
 
 _T = TypeVar("_T")
 
@@ -76,6 +77,7 @@ rich_click_config.OPTION_GROUPS = {
                 "--mapping-file",
                 "--keep-working-files",
                 "--keep-unzipped",
+                "--jobs",
                 "--version",
                 "--help",
             ],
@@ -748,6 +750,19 @@ def _prepare_processing_options(
         "final/ -- e.g. for a later BIDS conversion that wants plain files, not a tarball."
     ),
 )
+@click.option(
+    "--jobs",
+    "-j",
+    type=click.IntRange(min=1),
+    default=None,
+    metavar="N",
+    panel="Optional flags",
+    help=(
+        "Number of parallel workers for reading, sanitising and compressing. Default: "
+        "automatic, from the CPUs available, any container limit and memory. Use 1 to "
+        "run without parallelism."
+    ),
+)
 def cli(
     source_dir: Path,
     out_dir: Path | None,
@@ -764,8 +779,10 @@ def cli(
     mapping_file: Path | None,
     keep_working_files: bool,
     keep_unzipped: bool,
+    jobs: int | None,
 ) -> None:
     """Run the standard, end-to-end dichotomise pipeline."""
+    set_jobs(jobs)
     processing_given = _processing_options_given(
         sanitise,
         sanitise_policy,

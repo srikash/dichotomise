@@ -10,6 +10,14 @@ import pytest
 from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
+from dichotomise.utils.jobs import set_jobs
+
+
+@pytest.fixture(autouse=True)
+def _automatic_jobs() -> None:
+    """Leave the worker count automatic, so one test's --jobs cannot reach another."""
+    set_jobs(None)
+
 
 def _make_dicom_file(path: Path, **overrides: object) -> Path:
     """Write a minimal, valid synthetic DICOM file to `path` and return it.

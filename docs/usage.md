@@ -36,6 +36,7 @@ folder names do not need to be sensible.
 | `--mapping-file` | JSON object mapping DICOM PatientID to replacement ID, for example `{"source-01": "sub-0001"}`. A full path may be given with or without the `.json` suffix. |
 | `--keep-working-files` | Keep the processed DICOM files written during rectify/sanitise (`working/`) instead of deleting them once they are archived. |
 | `--keep-unzipped` | Also keep each study's final (optionally sanitised) files unarchived, in `final/`, independent of `--keep-working-files`, for a later BIDS conversion or other tooling that wants plain files rather than a tarball. |
+| `-j`, `--jobs` | Number of parallel workers for reading, sanitising and compressing. Default: automatic, from the CPUs available, any container CPU limit and memory. `1` runs without parallelism. A larger value is still limited to what fits in memory. |
 
 For one study, use `--subj-id`, `--random-name`, or `--new-id`. For several
 studies, use `--subj-id` (automatic enumeration), `--random-name`, `--mapping`,

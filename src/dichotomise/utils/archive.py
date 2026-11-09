@@ -19,6 +19,7 @@ from typing import BinaryIO
 
 from dichotomise.errors import ArchiveCreationError
 from dichotomise.utils import fs
+from dichotomise.utils.jobs import get_jobs
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -192,6 +193,14 @@ def _drain_to_file(
                 process.terminate()
 
 
+def _pigz_command(pigz: str) -> list[str]:
+    """The `pigz` command line: all cores by default, `-p N` when `--jobs` was given."""
+    command = [pigz, "-c", f"-{_GZIP_COMPRESSLEVEL}"]
+    if (jobs := get_jobs()) is not None:
+        command += ["-p", str(jobs)]
+    return command
+
+
 def _write_tarball_with_pigz(
     pigz: str,
     entries: Sequence[tuple[Path, Path]],
@@ -210,7 +219,7 @@ def _write_tarball_with_pigz(
     with archive_path.open("wb") as raw_file:
         out_file = _HashingWriter(raw_file, archive_path)
         process = subprocess.Popen(
-            [pigz, "-c", f"-{_GZIP_COMPRESSLEVEL}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
+            _pigz_command(pigz), stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
         stdin, stdout = process.stdin, process.stdout
         assert stdin is not None and stdout is not None  # guaranteed by the pipes above

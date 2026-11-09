@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.9.4
+
+Choose the number of parallel workers. Output is unchanged.
+
+- `--jobs N` (`-j N`) sets how many workers read headers, sanitise, check copies and compress (`pigz -p N`). Without it the count is automatic, as before. `--jobs 1` runs without parallelism. The memory limit still applies, so a very large `N` may start fewer workers.
+
 ## v2.9.3
 
 Version flag. Output is unchanged.

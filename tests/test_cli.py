@@ -14,6 +14,7 @@ from click.testing import CliRunner
 
 import dichotomise.cli as cli_module
 from dichotomise.cli import _package_version, cli
+from dichotomise.utils.jobs import get_jobs
 
 
 def test_interactive_interrupt_stops_work(tmp_path: Path) -> None:
@@ -631,3 +632,21 @@ def test_cli_version_flag_and_help_header() -> None:
 
     help_result = CliRunner().invoke(cli, ["--help"])
     assert unstyle(help_result.output).lstrip().startswith(version_line)
+
+
+def test_cli_jobs_sets_the_worker_count_and_rejects_zero(
+    tmp_path: Path, make_dicom_file: Callable[..., Path]
+) -> None:
+    source = tmp_path / "export"
+    make_dicom_file(source / "series" / "1.dcm", PatientID="sub-01", StudyInstanceUID="study-a")
+
+    result = CliRunner().invoke(cli, ["--qc", "--source-dir", str(source), "--jobs", "2"])
+    assert result.exit_code == 0, result.output
+    assert get_jobs() == 2
+
+    result = CliRunner().invoke(cli, ["--qc", "--source-dir", str(source), "-j", "0"])
+    assert result.exit_code == 2
+    assert "--jobs" in unstyle(result.output) or "-j" in unstyle(result.output)
+
+    CliRunner().invoke(cli, ["--qc", "--source-dir", str(source)])
+    assert get_jobs() is None

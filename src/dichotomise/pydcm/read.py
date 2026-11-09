@@ -17,6 +17,7 @@ from pydicom.errors import InvalidDicomError
 from pydicom.multival import MultiValue
 
 from dichotomise.errors import InvalidDicomMetadataError, NotDicomError
+from dichotomise.utils.jobs import get_jobs
 
 
 @dataclass(frozen=True)
@@ -215,7 +216,13 @@ def _cpu_limit_from_cgroup(text: str) -> int | None:
 
 
 def _worker_count() -> int:
-    """How many header-reading processes to start: usable CPUs, capped by any container quota."""
+    """How many header-reading processes to start: `--jobs` if given, else usable CPUs.
+
+    Automatic sizing is capped by any container quota and by `_MAX_WORKERS`; an explicit
+    `--jobs` is used as asked (`_workers_for` still limits it to what fits in memory).
+    """
+    if (jobs := get_jobs()) is not None:
+        return jobs
     try:
         available = len(os.sched_getaffinity(0))
     except AttributeError:  # not available on every platform

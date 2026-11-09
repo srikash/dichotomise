@@ -17,6 +17,7 @@ from dichotomise.pydcm.read import (
     pixel_fingerprint,
     read_metadata,
 )
+from dichotomise.utils.jobs import set_jobs
 
 
 @pytest.mark.parametrize("field", ["PixelData", "FloatPixelData", "DoubleFloatPixelData"])
@@ -208,3 +209,10 @@ def test_one_file_too_big_for_two_workers_is_mapped_without_a_pool(
 
     assert read_module._parallel_map(_double, [1, 2, 3], largest_file=4096) == [2, 4, 6]
     assert started == []
+
+
+def test_jobs_overrides_the_automatic_worker_count() -> None:
+    set_jobs(3)
+    assert read_module._worker_count() == 3
+    set_jobs(None)
+    assert read_module._worker_count() >= 1
