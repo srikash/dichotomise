@@ -69,10 +69,8 @@ One command runs the full pipeline, in order:
    The resulting archive receives a checksum. These checks do not establish
    compliance with a DICOM confidentiality profile.
 
-This is a from-scratch, simplified rewrite of the original `dichotomise`,
-aimed at being easy to read, debug, and extend, including for someone new to
-Python. It implements a single end-to-end pipeline; there is no separate
-expert/stage-by-stage command.
+It is a single end-to-end pipeline, kept simple to read, debug and extend; there is
+no separate stage-by-stage command.
 
 ## Workflow diagram
 
