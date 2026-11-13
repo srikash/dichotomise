@@ -32,6 +32,7 @@ from dichotomise.stages.audit import (
     AuditedFile,
     AuditResult,
     _FolderSummary,
+    _plural,
     audit_directory,
     folder_notes,
     folder_summaries,
@@ -108,6 +109,17 @@ class ProcessingOptions:
     subject_mappings: dict[str, str] | None
 
 
+def _panel(title: str, markup: str) -> Panel:
+    """A yellow, left-titled example panel for the `--help` epilog."""
+    return Panel(
+        Text.from_markup(markup),
+        title=Text.from_markup(f"[bold yellow]{title}[/]"),
+        title_align="left",
+        border_style="yellow",
+        padding=(0, 1),
+    )
+
+
 class DichotomiseCommand(RichCommand):
     """Render the command's usage notes in the same Rich style as its options."""
 
@@ -120,47 +132,32 @@ class DichotomiseCommand(RichCommand):
         """Print the single- and multi-subject example panels under the help text."""
         if self.epilog is None:
             return
-        single_subject = Panel(
-            Text.from_markup(
-                f"[bold cyan]Numerical:[/] {_EXAMPLE_COMMAND} "
-                "[bold cyan]--sanitise[/] [bold cyan]--subj-id[/] [magenta]6[/]\n"
-                "           Creates [green]sub-0006[/].\n\n"
-                f"[bold cyan]Random:[/] {_EXAMPLE_COMMAND} [bold cyan]--random-name[/]\n\n"
-                f"[bold cyan]Exact:[/] {_EXAMPLE_COMMAND} "
-                "[bold cyan]--sanitise[/] [bold cyan]--new-id[/] [magenta]ADNC0751[/]\n"
-                "       Creates [green]sub-ADNC0751[/]."
-            ),
-            title=Text.from_markup("[bold yellow]Single-Subject mode[/]"),
-            title_align="left",
-            border_style="yellow",
-            padding=(0, 1),
+        single_subject = _panel(
+            "Single-Subject mode",
+            f"[bold cyan]Numerical:[/] {_EXAMPLE_COMMAND} "
+            "[bold cyan]--sanitise[/] [bold cyan]--subj-id[/] [magenta]6[/]\n"
+            "           Creates [green]sub-0006[/].\n\n"
+            f"[bold cyan]Random:[/] {_EXAMPLE_COMMAND} [bold cyan]--random-name[/]\n\n"
+            f"[bold cyan]Exact:[/] {_EXAMPLE_COMMAND} "
+            "[bold cyan]--sanitise[/] [bold cyan]--new-id[/] [magenta]ADNC0751[/]\n"
+            "       Creates [green]sub-ADNC0751[/].",
         )
-        multi_subject = Panel(
-            Text.from_markup(
-                f"[bold cyan]Numerical:[/] {_EXAMPLE_COMMAND} "
-                "[bold cyan]--sanitise[/] [bold cyan]--subj-id[/] [magenta]6[/]\n"
-                "           Creates [green]sub-0006[/], [green]sub-0007[/], [green]sub-0008[/], …\n"
-                "           [yellow]Warning:[/] enumeration is enabled automatically.\n\n"
-                f"[bold cyan]Random:[/] {_EXAMPLE_COMMAND} [bold cyan]--random-name[/]\n\n"
-                f"[bold cyan]Mapped:[/] {_EXAMPLE_COMMAND} "
-                "[bold cyan]--sanitise[/] [bold cyan]--mapping-file[/] "
-                "[green]/path/to/mapping_file.json[/]"
-            ),
-            title=Text.from_markup("[bold yellow]Multi-Subject mode[/]"),
-            title_align="left",
-            border_style="yellow",
-            padding=(0, 1),
+        multi_subject = _panel(
+            "Multi-Subject mode",
+            f"[bold cyan]Numerical:[/] {_EXAMPLE_COMMAND} "
+            "[bold cyan]--sanitise[/] [bold cyan]--subj-id[/] [magenta]6[/]\n"
+            "           Creates [green]sub-0006[/], [green]sub-0007[/], [green]sub-0008[/], …\n"
+            "           [yellow]Warning:[/] enumeration is enabled automatically.\n\n"
+            f"[bold cyan]Random:[/] {_EXAMPLE_COMMAND} [bold cyan]--random-name[/]\n\n"
+            f"[bold cyan]Mapped:[/] {_EXAMPLE_COMMAND} "
+            "[bold cyan]--sanitise[/] [bold cyan]--mapping-file[/] "
+            "[green]/path/to/mapping_file.json[/]",
         )
-        qc_mode = Panel(
-            Text.from_markup(
-                "[bold white]dichotomise[/] [bold cyan]--qc[/] "
-                "[bold cyan]--source-dir[/] [green]/path/to/scanner_export[/]\n"
-                "Prints the DICOM audit table only; no files or folders are created."
-            ),
-            title=Text.from_markup("[bold yellow]QC mode[/]"),
-            title_align="left",
-            border_style="yellow",
-            padding=(0, 1),
+        qc_mode = _panel(
+            "QC mode",
+            "[bold white]dichotomise[/] [bold cyan]--qc[/] "
+            "[bold cyan]--source-dir[/] [green]/path/to/scanner_export[/]\n"
+            "Prints the DICOM audit table only; no files or folders are created.",
         )
         content = Group(
             Text.from_markup("[bold orange1]Usage Guide:[/]"),
@@ -295,18 +292,13 @@ def _log_archive_progress(description: str, done: int, total: int) -> None:
 def _audit_reasons(summary: _FolderSummary) -> list[str]:
     """Return the per-folder data-quality and structural findings."""
     reasons = [f"{field} varies" for field in summary.inconsistencies]
-    duplicate_count = summary.duplicate_count
-    misfiled_count = summary.misfiled_count
-    conflict_count = summary.conflict_count
-    if duplicate_count:
-        suffix = "file" if duplicate_count == 1 else "files"
-        reasons.append(f"{duplicate_count} duplicate {suffix}")
-    if conflict_count:
-        suffix = "file" if conflict_count == 1 else "files"
-        reasons.append(f"{conflict_count} SOP-UID conflict {suffix}")
-    if misfiled_count:
-        suffix = "file" if misfiled_count == 1 else "files"
-        reasons.append(f"{misfiled_count} misfiled {suffix}")
+    for count, noun in (
+        (summary.duplicate_count, "duplicate"),
+        (summary.conflict_count, "SOP-UID conflict"),
+        (summary.misfiled_count, "misfiled"),
+    ):
+        if count:
+            reasons.append(f"{count} {noun} {_plural(count, 'file', 'files')}")
     return reasons
 
 
