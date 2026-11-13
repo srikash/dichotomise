@@ -627,19 +627,13 @@ def test_run_pipeline_keeps_every_file_of_a_single_folder_export(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
-    _write_export(
-        source,
-        make_dicom_file,
-        flat=True,
-        folder="M0450__flat-secret",
-        description="secret-protocol-{}",
-    )
+    total = _write_secret_flat_export(source, make_dicom_file)
 
     run = run_pipeline(source, tmp_path / "out")
 
     reports_dir = next(run.reports_dir.iterdir())
     sift_report = json.loads((reports_dir / "stage-02-report.json").read_text())
-    assert sift_report["retained_count"] == 9
+    assert sift_report["retained_count"] == total
     assert sift_report["review_count"] == 0
     audit_report = json.loads((reports_dir / "stage-01-report.json").read_text())
     assert audit_report["misfiled_count"] == 0
@@ -654,13 +648,7 @@ def test_run_pipeline_sanitised_reports_of_a_single_folder_export_name_no_source
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
-    _write_export(
-        source,
-        make_dicom_file,
-        flat=True,
-        folder="M0450__flat-secret",
-        description="secret-protocol-{}",
-    )
+    _write_secret_flat_export(source, make_dicom_file)
 
     run = run_pipeline(source, tmp_path / "out", sanitise_requested=True)
 
@@ -685,8 +673,12 @@ def _write_export(
     flat: bool,
     folder: str = "everything",
     description: str = "scan{}",
-) -> None:
-    """Three series of three files, sorted into series folders or all in one `folder`."""
+) -> int:
+    """Write three series of three files, sorted into series folders or all in one `folder`.
+
+    Returns the number of files written.
+    """
+    count = 0
     for number in (3, 4, 5):
         for instance in (1, 2, 3):
             sop = f"9.8.{number}.{instance}"
@@ -705,6 +697,19 @@ def _write_export(
                 InstanceNumber=instance,
                 SOPInstanceUID=sop,
             )
+            count += 1
+    return count
+
+
+def _write_secret_flat_export(source: Path, make_dicom_file: Callable[..., Path]) -> int:
+    """A single-folder export whose folder and series descriptions must stay out of the output."""
+    return _write_export(
+        source,
+        make_dicom_file,
+        flat=True,
+        folder="M0450__flat-secret",
+        description="secret-protocol-{}",
+    )
 
 
 def test_run_pipeline_gives_the_same_result_for_sorted_and_single_folder_exports(
