@@ -5,9 +5,11 @@ from __future__ import annotations
 import shutil
 from collections import defaultdict
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import pytest
+from helpers import make_metadata
 
 from dichotomise.pydcm.identify import (
     file_digest,
@@ -27,25 +29,13 @@ DATA_DIR = (
 )
 
 
-def _metadata(path: Path, **overrides: object) -> DicomMetadata:
-    """A `DicomMetadata` with fixed defaults; keyword arguments override them."""
-    defaults: dict[str, object] = {
-        "path": path,
-        "patient_id": "sub-01",
-        "patient_name": "Doe^Jane^19900101",
-        "study_instance_uid": "1.2.3",
-        "series_instance_uid": "1.2.840.10008.5.1.4.1.1.4.99",
-        "sop_instance_uid": "1.2.3.4",
-        "series_number": 21,
-        "series_description": "diffusion",
-        "protocol_name": "DWI_64dir",
-        "instance_number": 1,
-        "echo_number": 1,
-        "study_date": "20260101",
-        "study_time": "120000",
-    }
-    defaults.update(overrides)
-    return DicomMetadata(**defaults)  # type: ignore[arg-type]
+_metadata = partial(
+    make_metadata,
+    study_instance_uid="1.2.3",
+    series_instance_uid="1.2.840.10008.5.1.4.1.1.4.99",
+    sop_instance_uid="1.2.3.4",
+    protocol_name="DWI_64dir",
+)
 
 
 def test_file_digest_matches_only_for_byte_identical_files(

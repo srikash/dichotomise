@@ -7,6 +7,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from helpers import make_metadata as _metadata
+
 from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.stages.audit import AuditedFile, AuditResult
 from dichotomise.stages.capture import CapturedSubject
@@ -35,25 +37,6 @@ def _subject(source_root: Path, files: list[DicomMetadata] | None = None) -> Cap
         files=files or [],
         source_root=source_root,
         working_dir=source_root,
-    )
-
-
-def _metadata(path: Path) -> DicomMetadata:
-    """A `DicomMetadata` with fixed values for the file at `path`."""
-    return DicomMetadata(
-        path=path,
-        patient_id="sub-01",
-        patient_name="Doe^Jane^19900101",
-        study_instance_uid="study-a",
-        series_instance_uid="series-a",
-        sop_instance_uid="sop-1",
-        series_number=21,
-        series_description="diffusion",
-        protocol_name="DWI",
-        instance_number=1,
-        echo_number=1,
-        study_date="20260101",
-        study_time="120000",
     )
 
 

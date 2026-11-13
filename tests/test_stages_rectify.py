@@ -4,35 +4,17 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import pytest
-from helpers import make_subject
+from helpers import make_metadata, make_subject
 
 from dichotomise.errors import DichotomiseError, FinaliseVerificationError
-from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.stages.rectify import rectify, rectify_review
 from dichotomise.stages.sift import ReviewFile, SiftResult
 
-
-def _metadata(path: Path, **overrides: object) -> DicomMetadata:
-    defaults: dict[str, object] = {
-        "path": path,
-        "patient_id": "sub-01",
-        "patient_name": "Doe^Jane^19900101",
-        "study_instance_uid": "study-a",
-        "series_instance_uid": "series-dwi",
-        "sop_instance_uid": "sop-1",
-        "series_number": 21,
-        "series_description": "diffusion",
-        "protocol_name": "DWI",
-        "instance_number": 1,
-        "echo_number": 1,
-        "study_date": "20260101",
-        "study_time": "120000",
-    }
-    defaults.update(overrides)
-    return DicomMetadata(**defaults)  # type: ignore[arg-type]
+_metadata = partial(make_metadata, series_instance_uid="series-dwi")
 
 
 def test_rectify_copies_retained_files_into_their_agreed_names(tmp_path: Path) -> None:

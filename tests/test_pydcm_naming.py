@@ -2,31 +2,21 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
+from helpers import make_metadata
+
 from dichotomise.pydcm.naming import rectified_path, with_new_sop_instance_uid
-from dichotomise.pydcm.read import DicomMetadata
 
-
-def _metadata(**overrides: object) -> DicomMetadata:
-    """A `DicomMetadata` with fixed defaults; keyword arguments override them."""
-    defaults: dict[str, object] = {
-        "path": Path("/source/1.dcm"),
-        "patient_id": "sub-01",
-        "patient_name": "Doe^Jane^19900101",
-        "study_instance_uid": "1.2.3",
-        "series_instance_uid": "1.2.840.10008.5.1.4.1.1.4.99",
-        "sop_instance_uid": "1.2.3.4",
-        "series_number": 21,
-        "series_description": "diffusion",
-        "protocol_name": "DWI 64 dir",
-        "instance_number": 5,
-        "echo_number": 1,
-        "study_date": "20260101",
-        "study_time": "120000",
-    }
-    defaults.update(overrides)
-    return DicomMetadata(**defaults)  # type: ignore[arg-type]
+_metadata = partial(
+    make_metadata,
+    study_instance_uid="1.2.3",
+    series_instance_uid="1.2.840.10008.5.1.4.1.1.4.99",
+    sop_instance_uid="1.2.3.4",
+    protocol_name="DWI 64 dir",
+    instance_number=5,
+)
 
 
 def test_rectified_path_uses_the_series_description_for_the_folder_name() -> None:

@@ -194,7 +194,7 @@ def _drain_to_file(
 
 
 def _pigz_command(pigz: str) -> list[str]:
-    """The `pigz` command line: all cores by default, `-p N` when `--jobs` was given."""
+    """The `pigz` command line, with `-p N` only when `--jobs` was given."""
     command = [pigz, "-c", f"-{_GZIP_COMPRESSLEVEL}"]
     if (jobs := get_jobs()) is not None:
         command += ["-p", str(jobs)]

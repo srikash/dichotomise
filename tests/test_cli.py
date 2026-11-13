@@ -646,7 +646,7 @@ def test_cli_jobs_sets_the_worker_count_and_rejects_zero(
 
     result = CliRunner().invoke(cli, ["--qc", "--source-dir", str(source), "-j", "0"])
     assert result.exit_code == 2
-    assert "--jobs" in unstyle(result.output) or "-j" in unstyle(result.output)
+    assert "--jobs" in unstyle(result.output)
 
     CliRunner().invoke(cli, ["--qc", "--source-dir", str(source)])
     assert get_jobs() is None

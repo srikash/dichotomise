@@ -4,32 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from helpers import make_metadata as _metadata
+
 from dichotomise.stages.audit import AuditedFile, AuditResult
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.sift import sift
-
-
-def _metadata(path: Path, **overrides: object):
-    """A `DicomMetadata` with fixed defaults; keyword arguments override them."""
-    from dichotomise.pydcm.read import DicomMetadata
-
-    defaults: dict[str, object] = {
-        "path": path,
-        "patient_id": "sub-01",
-        "patient_name": "Doe^Jane^19900101",
-        "study_instance_uid": "study-a",
-        "series_instance_uid": "series-a",
-        "sop_instance_uid": "sop-1",
-        "series_number": 21,
-        "series_description": "diffusion",
-        "protocol_name": "DWI",
-        "instance_number": 1,
-        "echo_number": 1,
-        "study_date": "20260101",
-        "study_time": "120000",
-    }
-    defaults.update(overrides)
-    return DicomMetadata(**defaults)  # type: ignore[arg-type]
 
 
 def test_sift_splits_files_into_retained_and_review_without_copying(tmp_path: Path) -> None:

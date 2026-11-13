@@ -328,8 +328,19 @@ def test_source_changed_during_capture_is_rejected(
         run_pipeline(source, tmp_path / "out")
 
 
-def test_sanitised_pixel_corruption_before_archiving_is_rejected(
-    tmp_path: Path, make_dicom_file: Callable[..., Path]
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("PixelData", b"\x03\x04", "Pixel data differs"),
+        ("PatientID", "unexpected", "Sanitised identity differs"),
+    ],
+)
+def test_sanitised_corruption_before_archiving_is_rejected(
+    tmp_path: Path,
+    make_dicom_file: Callable[..., Path],
+    field: str,
+    value: object,
+    message: str,
 ) -> None:
     source = tmp_path / "export"
     make_dicom_file(source / "series" / "1.dcm", PixelData=b"\x01\x02")
@@ -339,28 +350,10 @@ def test_sanitised_pixel_corruption_before_archiving_is_rejected(
         if status == "started" and description.endswith("creating verified archive"):
             output = next(out_dir.rglob("working/*/sanitise/**/*.dcm"))
             dataset = pydicom.dcmread(output)
-            dataset.PixelData = b"\x03\x04"
+            setattr(dataset, field, value)
             dataset.save_as(output)
 
-    with pytest.raises(FinaliseVerificationError, match="Pixel data differs"):
-        run_pipeline(source, out_dir, sanitise_requested=True, on_stage=corrupt_output)
-
-
-def test_sanitised_identity_corruption_before_archiving_is_rejected(
-    tmp_path: Path, make_dicom_file: Callable[..., Path]
-) -> None:
-    source = tmp_path / "export"
-    make_dicom_file(source / "series" / "1.dcm")
-    out_dir = tmp_path / "out"
-
-    def corrupt_output(status: str, description: str, elapsed: float) -> None:
-        if status == "started" and description.endswith("creating verified archive"):
-            output = next(out_dir.rglob("working/*/sanitise/**/*.dcm"))
-            dataset = pydicom.dcmread(output)
-            dataset.PatientID = "unexpected"
-            dataset.save_as(output)
-
-    with pytest.raises(FinaliseVerificationError, match="Sanitised identity differs"):
+    with pytest.raises(FinaliseVerificationError, match=message):
         run_pipeline(source, out_dir, sanitise_requested=True, on_stage=corrupt_output)
 
 
@@ -630,39 +623,23 @@ def test_run_pipeline_sanitised_run_writes_a_source_map_beside_the_source_archiv
     assert rows["folder-01/0002"]["final_file"].endswith("_e01.dcm")
 
 
-def _write_flat_export(source: Path, make_dicom_file: Callable[..., Path]) -> int:
-    """Write three series into one folder, each file named after its own SOP Instance UID."""
-    folder = source / "M0450__flat-secret"
-    count = 0
-    for number in (3, 4, 5):
-        for instance in (1, 2, 3):
-            sop = f"9.8.{number}.{instance}"
-            make_dicom_file(
-                folder / f"MRe.{sop}",
-                PatientID="sub-01",
-                StudyInstanceUID="9.8.0",
-                SeriesInstanceUID=f"9.8.{number}",
-                SeriesNumber=number,
-                SeriesDescription=f"secret-protocol-{number}",
-                ProtocolName=f"secret-protocol-{number}",
-                InstanceNumber=instance,
-                SOPInstanceUID=sop,
-            )
-            count += 1
-    return count
-
-
 def test_run_pipeline_keeps_every_file_of_a_single_folder_export(
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
-    total = _write_flat_export(source, make_dicom_file)
+    _write_export(
+        source,
+        make_dicom_file,
+        flat=True,
+        folder="M0450__flat-secret",
+        description="secret-protocol-{}",
+    )
 
     run = run_pipeline(source, tmp_path / "out")
 
     reports_dir = next(run.reports_dir.iterdir())
     sift_report = json.loads((reports_dir / "stage-02-report.json").read_text())
-    assert sift_report["retained_count"] == total
+    assert sift_report["retained_count"] == 9
     assert sift_report["review_count"] == 0
     audit_report = json.loads((reports_dir / "stage-01-report.json").read_text())
     assert audit_report["misfiled_count"] == 0
@@ -677,7 +654,13 @@ def test_run_pipeline_sanitised_reports_of_a_single_folder_export_name_no_source
     tmp_path: Path, make_dicom_file: Callable[..., Path]
 ) -> None:
     source = tmp_path / "export"
-    _write_flat_export(source, make_dicom_file)
+    _write_export(
+        source,
+        make_dicom_file,
+        flat=True,
+        folder="M0450__flat-secret",
+        description="secret-protocol-{}",
+    )
 
     run = run_pipeline(source, tmp_path / "out", sanitise_requested=True)
 
@@ -695,13 +678,20 @@ def test_run_pipeline_sanitised_reports_of_a_single_folder_export_name_no_source
     ]
 
 
-def _write_export(source: Path, make_dicom_file: Callable[..., Path], *, flat: bool) -> None:
-    """The same three series, either sorted into series folders or all in one folder."""
+def _write_export(
+    source: Path,
+    make_dicom_file: Callable[..., Path],
+    *,
+    flat: bool,
+    folder: str = "everything",
+    description: str = "scan{}",
+) -> None:
+    """Three series of three files, sorted into series folders or all in one `folder`."""
     for number in (3, 4, 5):
         for instance in (1, 2, 3):
             sop = f"9.8.{number}.{instance}"
             if flat:
-                path = source / "everything" / f"MRe.{sop}"
+                path = source / folder / f"MRe.{sop}"
             else:
                 path = source / f"scan_{number}_MR" / f"{instance}.dcm"
             make_dicom_file(
@@ -710,8 +700,8 @@ def _write_export(source: Path, make_dicom_file: Callable[..., Path], *, flat: b
                 StudyInstanceUID="9.8.0",
                 SeriesInstanceUID=f"9.8.{number}",
                 SeriesNumber=number,
-                SeriesDescription=f"scan{number}",
-                ProtocolName=f"scan{number}",
+                SeriesDescription=description.format(number),
+                ProtocolName=description.format(number),
                 InstanceNumber=instance,
                 SOPInstanceUID=sop,
             )

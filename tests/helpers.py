@@ -8,7 +8,29 @@ from typing import Any
 
 import pytest
 
+from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.stages.capture import CapturedSubject
+
+
+def make_metadata(path: Path = Path("/source/1.dcm"), **overrides: object) -> DicomMetadata:
+    """A `DicomMetadata` with fixed defaults; keyword arguments override them."""
+    defaults: dict[str, object] = {
+        "path": path,
+        "patient_id": "sub-01",
+        "patient_name": "Doe^Jane^19900101",
+        "study_instance_uid": "study-a",
+        "series_instance_uid": "series-a",
+        "sop_instance_uid": "sop-1",
+        "series_number": 21,
+        "series_description": "diffusion",
+        "protocol_name": "DWI",
+        "instance_number": 1,
+        "echo_number": 1,
+        "study_date": "20260101",
+        "study_time": "120000",
+    }
+    defaults.update(overrides)
+    return DicomMetadata(**defaults)  # type: ignore[arg-type]
 
 
 def make_subject(working_dir: Path, source_root: Path | None = None) -> CapturedSubject:
