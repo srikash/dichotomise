@@ -9,7 +9,6 @@ import pydicom
 from pydicom.errors import InvalidDicomError
 
 from dichotomise.errors import FinaliseVerificationError
-from dichotomise.pydcm.identify import file_digest
 from dichotomise.pydcm.read import _parallel_map, metadata_from_dataset, pixel_fingerprint
 from dichotomise.run import Run
 from dichotomise.stages.capture import CapturedSubject
@@ -21,6 +20,7 @@ from dichotomise.stages.rectify import (
 )
 from dichotomise.stages.sanitise import SanitiseResult, SanitiseReviewResult
 from dichotomise.utils.archive import Archive, ProgressCallback, make_tarball
+from dichotomise.utils.fs import file_digest
 from dichotomise.utils.text import safe_filename_text
 
 

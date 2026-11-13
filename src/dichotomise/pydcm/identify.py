@@ -12,11 +12,6 @@ from dichotomise.utils import fs
 from dichotomise.utils.text import natural_sort_key
 
 
-def file_digest(path: Path, cache: MutableMapping[Path, str] | None = None) -> str:
-    """SHA-256 of the file's raw bytes: equal only for byte-for-byte copies."""
-    return fs.file_digest(path, cache)
-
-
 def find_duplicate_pairs(
     paths: Sequence[Path], cache: MutableMapping[Path, str] | None = None
 ) -> dict[Path, Path]:
@@ -36,7 +31,7 @@ def find_duplicate_pairs(
             continue
         originals: dict[str, Path] = {}
         for path in sorted(same_size, key=lambda item: natural_sort_key(item.name)):
-            digest = file_digest(path, cache)
+            digest = fs.file_digest(path, cache)
             if digest in originals:
                 pairs[path] = originals[digest]
             else:
@@ -59,7 +54,7 @@ def find_sop_conflicts(
             by_uid.setdefault(item.sop_instance_uid, []).append(item.path)
     conflicts: set[Path] = set()
     for group in by_uid.values():
-        if len(group) > 1 and len({file_digest(path, cache) for path in group}) > 1:
+        if len(group) > 1 and len({fs.file_digest(path, cache) for path in group}) > 1:
             conflicts.update(group)
     return conflicts
 

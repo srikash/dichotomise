@@ -15,11 +15,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from dichotomise.errors import FinaliseVerificationError, NamingCollisionError
-from dichotomise.pydcm.identify import file_digest
 from dichotomise.pydcm.naming import rectified_path
 from dichotomise.pydcm.read import DicomMetadata
 from dichotomise.stages.capture import CapturedSubject
 from dichotomise.stages.sift import SiftResult
+from dichotomise.utils.fs import file_digest
 
 
 @dataclass(frozen=True)

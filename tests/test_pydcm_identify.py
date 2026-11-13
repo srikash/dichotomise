@@ -12,12 +12,12 @@ import pytest
 from helpers import make_metadata
 
 from dichotomise.pydcm.identify import (
-    file_digest,
     find_duplicate_pairs,
     find_misfiled_files,
     find_sop_conflicts,
 )
 from dichotomise.pydcm.read import DicomMetadata, iter_dicom_metadata, read_metadata
+from dichotomise.utils.fs import file_digest
 
 DATA_DIR = (
     Path(__file__).parent
