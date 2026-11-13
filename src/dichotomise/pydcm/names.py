@@ -1,8 +1,8 @@
-"""generate_name(): a self-contained "adjective_surname" placeholder-name generator.
+"""generate_name(): a self-contained (adjective, surname) placeholder-name generator.
 
 Used by the `minimal` sanitisation policy's `random_name` action instead of a
 third-party package. Follows the same naming scheme the project previously
-used a vendored library for (one adjective, one surname, joined by "_"), but
+used a vendored library for (one adjective, one surname), but
 is otherwise our own code and our own word lists. Nothing here is derived
 from that library.
 
@@ -1155,6 +1155,6 @@ SURNAMES = [
 ]
 
 
-def generate_name(separator: str = "_") -> str:
-    """A random "adjective<separator>surname" placeholder, e.g. "gracious_mclean"."""
-    return f"{random.choice(ADJECTIVES)}{separator}{random.choice(SURNAMES)}"
+def generate_name() -> tuple[str, str]:
+    """A random (adjective, surname) placeholder, e.g. ("gracious", "Abrahall")."""
+    return random.choice(ADJECTIVES), random.choice(SURNAMES)

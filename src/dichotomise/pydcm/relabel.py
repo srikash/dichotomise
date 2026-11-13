@@ -401,8 +401,8 @@ def format_subject_name(label: str) -> str:
 
 def _generate_person_name() -> str:
     """A random "Surname^Firstname"-style placeholder, in DICOM PN form."""
-    given, _, family = generate_name().rpartition("_")
-    return f"{_format_name_part(family)}^{_format_name_part(given)}"
+    adjective, surname = generate_name()
+    return f"{_format_name_part(surname)}^{_format_name_part(adjective)}"
 
 
 def _random_name_field(

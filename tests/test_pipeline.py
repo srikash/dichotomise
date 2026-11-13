@@ -1072,3 +1072,13 @@ def test_a_failure_while_deciding_replacement_values_fails_the_sanitising_stage(
         )
 
     assert ("failed", "Study 1: sanitising files") in events
+
+
+def test_random_subject_label_is_surname_then_adjective() -> None:
+    from dichotomise.pipeline import _random_subject_label
+    from dichotomise.pydcm.names import ADJECTIVES, SURNAMES
+
+    surname, _, adjective = _random_subject_label(set()).partition("_")
+
+    assert surname in SURNAMES
+    assert adjective in ADJECTIVES

@@ -73,8 +73,8 @@ def _run_stage(description: str, operation: Callable[[], _T], on_stage: StageCal
 def _random_subject_label(used_labels: set[str]) -> str:
     """Generate a unique, filesystem-safe pseudonym for one subject in this run."""
     while len(used_labels) < 100_000:
-        given_name, _, surname = generate_name().rpartition("_")
-        label = f"{surname}_{given_name}"
+        adjective, surname = generate_name()
+        label = f"{surname}_{adjective}"
         if label not in used_labels:
             used_labels.add(label)
             return label
