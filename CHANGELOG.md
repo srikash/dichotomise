@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.9.5
+
+Internal clean-up and documentation fixes. Output is unchanged.
+
+- Removed code and settings nothing used: the unused `console.status` helper, the `identify.file_digest` wrapper (callers use `utils.fs`), and two `mypy`/`ruff` options that repeat their defaults. File digests now use `hashlib.file_digest`, and `generate_name()` returns the adjective and surname as a pair instead of a joined string.
+- The `--help` epilog and the audit-reason lines are built by shared helpers; the tests share one metadata builder.
+- The policy table in `docs/sanitise-policies.md` now lists `retain.json` (it said `default.json`) and fuller `standard` and `minimal` rows. The `custom` row no longer claims it removes the accession number, which `standard` already does. `docs/usage.md` points to that table instead of repeating it, and the citation text lives in the README only.
+- A test now checks that the policy table matches the shipped policy files and that relative links in the docs resolve.
+
 ## v2.9.4
 
 Choose the number of parallel workers. Output is unchanged.
