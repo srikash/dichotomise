@@ -1,6 +1,6 @@
-# Development and citation
+# Development
 
-**TL;DR:** Find the package layout, development checks and citation details here.
+**TL;DR:** Find the package layout and development checks here.
 
 ## Layout
 
@@ -37,18 +37,5 @@ Large exports are read, sanitised and re-checked by several processes. The `dich
 command handles this itself. If you call the Python API from your own script (`run_pipeline`,
 `capture`, `finalise`, the sanitise functions or `iter_dicom_metadata`), put the call under
 `if __name__ == "__main__":`.
-
-## Citing dichotomise
-
-**TL;DR:** Use the citation metadata or the Zenodo concept DOI.
-
-Each release is archived on Zenodo with a DOI
-([![DOI](https://zenodo.org/badge/1397808016.svg)](https://doi.org/10.5281/zenodo.23166271)).
-Citation metadata (including the author and licence) is in
-[`CITATION.cff`](../CITATION.cff). GitHub renders a "Cite this repository"
-button from it on the repo's main page, or cite it directly:
-
-> Kashyap, S. (2026). *dichotomise* [Computer software].
-> https://doi.org/10.5281/zenodo.23166271
 
 [Back to the README](../README.md)

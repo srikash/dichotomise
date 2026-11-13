@@ -96,12 +96,17 @@ contents and reports.
 - [Usage and output](docs/usage.md): options, archives, manifests and reports.
 - [Workflow](docs/workflow.md): the processing stages and their checks.
 - [Sanitisation policies](docs/sanitise-policies.md): policy actions and customisation.
-- [Development and citation](docs/development.md): project layout and checks.
+- [Development](docs/development.md): project layout and checks.
 - [Changelog](CHANGELOG.md): what changed in each release.
 
 ## Citation and licence
 
 **TL;DR:** Cite the Zenodo concept DOI; the project uses the MIT licence.
 
-Citation details are in [CITATION.cff](CITATION.cff). The project is licensed
-under the [MIT licence](LICENCE).
+Each release is archived on Zenodo. Citation metadata is in [CITATION.cff](CITATION.cff),
+which GitHub renders as a "Cite this repository" button, or cite it directly:
+
+> Kashyap, S. (2026). *dichotomise* [Computer software].
+> https://doi.org/10.5281/zenodo.23166271
+
+The project is licensed under the [MIT licence](LICENCE).
