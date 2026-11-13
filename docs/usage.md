@@ -192,21 +192,10 @@ run-specific value, given a newly generated identifier (consistent across
 every file for that subject), a birth date scrambled to an approximate but
 different year, or a randomly generated placeholder name.
 
-Five policies ship in `src/dichotomise/pydcm/policies/`:
+Five policies ship in `src/dichotomise/pydcm/policies/`: `retain`, `standard`, `full`,
+`minimal` (the default) and `custom`. A policy that regenerates `SOPInstanceUID` remaps
+every other UID consistently across the study.
 
-| Policy | What happens |
-|---|---|
-| `retain` | Nothing changed. |
-| `standard` | Identity, patient address, accession number, institution, and device-operator fields removed; every instance UID reissued (study, series, SOP instance, frame of reference, referenced instances, dimension organisation), consistently across files; birth date scrambled by ±1 year (day/month randomised too); demographic fields (e.g. sex) and scan-descriptive text kept. |
-| `full` | Everything `standard` does, plus scan-descriptive text and the device serial number also removed. |
-| `minimal` *(the default level)* | Everything `standard` does, but a generated pseudonym is used for both patient name (`Abrahall^Gracious`) and patient ID/output name (`abrahall_gracious`); the birth date is the scan date rather than scrambled. |
-| `custom` | A worked, commented example for building your own. It is not used automatically. |
-
-A policy that regenerates `SOPInstanceUID` remaps every UID value except class, transfer-syntax and
-coding-scheme UIDs and the standard's registry UIDs (`1.2.840.10008.*`), which are shared
-by every site and stay as they are. A field the policy names itself follows its own action.
-A custom policy that regenerates some UIDs but not `SOPInstanceUID` reissues only those: references
-and private elements holding a regenerated UID follow it, in any file of the study, and every other UID stays as it is.
 The shipped policies keep private (vendor) elements, and some of those hold identifiers,
 UIDs included. Check them before you share sanitised data.
 
