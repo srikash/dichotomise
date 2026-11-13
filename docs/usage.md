@@ -194,7 +194,8 @@ different year, or a randomly generated placeholder name.
 
 Five policies ship in `src/dichotomise/pydcm/policies/`: `retain`, `standard`, `full`,
 `minimal` (the default) and `custom`. A policy that regenerates `SOPInstanceUID` remaps
-every other UID consistently across the study.
+every other UID consistently across the study, except class, transfer-syntax, coding-scheme and
+registry UIDs.
 
 The shipped policies keep private (vendor) elements, and some of those hold identifiers,
 UIDs included. Check them before you share sanitised data.

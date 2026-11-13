@@ -150,8 +150,8 @@ replace different fields.
 | Policy | Matches | What happens |
 |---|---|---|
 | `retain.json` | scanner's `default_export` | nothing changed |
-| `standard.json` | scanner's `service_export` | identity, patient address, accession number, institution, station and operator/performing-physician names removed; study, series, SOP-instance and frame-of-reference UIDs reissued; birth date scrambled by ±1 year (day/month randomised too), demographic fields (e.g. sex) and descriptive text kept |
-| `minimal.json` | (worked example, not a scanner export) | extends `standard`, but the replacement name is a random placeholder in `Surname^Firstname` form (e.g. `Abrahall^Gracious`) instead of the plain subject label, and the birth date is simply the scan date rather than scrambled — a lighter-weight alternative when a distinctive placeholder name matters more than keeping an approximate age |
+| `standard.json` | scanner's `service_export` | identity, patient address, accession number, institution, station and operator/performing-physician names removed; study, series, SOP-instance and frame-of-reference UIDs reissued, and every UID that refers to them, including inside nested sequences; birth date scrambled by ±1 year (day/month randomised too), demographic fields (e.g. sex) and descriptive text kept |
+| `minimal.json` | (worked example, not a scanner export) | extends `standard`, but the replacement name is a random placeholder in `Surname^Firstname` form (e.g. `Abrahall^Gracious`) instead of the plain subject label (the patient ID and output names use the same pseudonym in filesystem-safe form), and the birth date is simply the scan date rather than scrambled — a lighter-weight alternative when a distinctive placeholder name matters more than keeping an approximate age |
 | `full.json` | scanner's `reduced_export` | everything `standard` does, plus descriptive text and device serial number removed |
 | `custom.json` | (worked example, not a scanner export) | a template for a non-expert to copy: extends `full` but keeps protocol/series descriptions, and additionally removes referring/requesting physician — fields none of the other four touch |
 
